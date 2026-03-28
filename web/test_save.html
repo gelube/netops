@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>LLM 保存测试</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        .form-group { margin: 10px 0; }
+        label { display: inline-block; width: 120px; }
+        input { width: 300px; padding: 5px; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        #result { margin-top: 20px; padding: 15px; border: 1px solid #ddd; background: #f9f9f9; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>LLM 配置保存测试</h1>
+    
+    <div class="form-group">
+        <label>Provider:</label>
+        <input type="text" id="provider" value="openai">
+    </div>
+    <div class="form-group">
+        <label>Endpoint:</label>
+        <input type="text" id="endpoint" value="http://127.0.0.1:1234/v1">
+    </div>
+    <div class="form-group">
+        <label>API Key:</label>
+        <input type="text" id="api_key" value="">
+    </div>
+    <div class="form-group">
+        <label>Model:</label>
+        <input type="text" id="model" value="qwen2.5-coder-7b-instruct">
+    </div>
+    
+    <button onclick="testSave()">保存配置</button>
+    
+    <div id="result"></div>
+    
+    <script>
+        async function testSave() {
+            const data = {
+                provider: document.getElementById('provider').value,
+                endpoint: document.getElementById('endpoint').value,
+                api_key: document.getElementById('api_key').value,
+                model: document.getElementById('model').value
+            };
+            
+            console.log('发送数据:', data);
+            
+            try {
+                const response = await fetch('/api/llm/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                console.log('响应状态:', response.status);
+                const text = await response.text();
+                console.log('原始响应:', text);
+                
+                const result = JSON.parse(text);
+                
+                const resultDiv = document.getElementById('result');
+                if (result.success) {
+                    resultDiv.innerHTML = '<p class="success">✅ 保存成功!</p>' +
+                        '<p>Provider: ' + result.provider + '</p>' +
+                        '<p>Model: ' + result.model + '</p>';
+                } else {
+                    resultDiv.innerHTML = '<p class="error">❌ 保存失败:</p>' +
+                        '<p>' + (result.message || '未知错误') + '</p>' +
+                        '<p>错误详情: ' + (result.error || '无') + '</p>';
+                }
+            } catch (e) {
+                document.getElementById('result').innerHTML = 
+                    '<p class="error">❌ 请求失败:</p><p>' + e.message + '</p>' +
+                    '<p>请查看浏览器 Console 获取详细信息</p>';
+                console.error('请求错误:', e);
+            }
+        }
+    </script>
+</body>
+</html>

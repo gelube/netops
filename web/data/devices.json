@@ -1,0 +1,30 @@
+[
+  {
+    "id": "dev_1",
+    "name": "H3C",
+    "ip": "127.0.0.1",
+    "port": 30001,
+    "conn_type": "telnet",
+    "remark": "接入交换机",
+    "username": "",
+    "password": "",
+    "vendor": "h3c",
+    "device_type": "layer2_switch",
+    "model": "Comware",
+    "os_version": "Version"
+  },
+  {
+    "id": "dev_2",
+    "name": "H3C",
+    "ip": "127.0.0.1",
+    "port": 30002,
+    "conn_type": "telnet",
+    "remark": "核心交换机",
+    "username": "",
+    "password": "",
+    "vendor": "h3c",
+    "device_type": "layer2_switch",
+    "model": "unknown",
+    "os_version": "unknown"
+  }
+]

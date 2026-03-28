@@ -1,0 +1,332 @@
+﻿import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+#!/usr/bin/env python3
+"""NetOps AI - Clean Version"""
+
+from flask import Flask, request, jsonify, render_template
+from flask_socketio import SocketIO
+import json
+import re
+
+# 导入核心模块
+from app.core.discovery import TopologyDiscovery
+from app.llm.config import LLMConfig, LLMClient, ProviderType
+from app.core.device import Device, Vendor, DeviceType, Topology, Link, PortType, PortStatus
+from data_persistence import save_topology, load_topology, save_llm_config as persist_llm_config, load_llm_config as load_persisted_llm
+
+# 加载保存的数据
+saved_topology = load_topology()
+saved_llm = load_persisted_llm()
+
+app = Flask(__name__, template_folder='templates', static_folder='static')
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# 全局状态
+current_topology = None
+llm_config = None
+llm_client = None
+device_ports = {}
+
+# 初始化
+def initialize_from_saved():
+    global current_topology, llm_config, llm_client, device_ports
+    
+    if saved_topology:
+        try:
+            current_topology = Topology()
+            for dev_data in saved_topology.get('devices', []):
+                vendor_str = dev_data.get('vendor', 'unknown')
+                try:
+                    vendor = Vendor(vendor_str)
+                except:
+                    vendor = Vendor.UNKNOWN
+                
+                dtype_str = dev_data.get('device_type', 'unknown')
+                try:
+                    device_type = DeviceType(dtype_str)
+                except:
+                    device_type = DeviceType.UNKNOWN
+                
+                dev = Device(
+                    id=dev_data['id'],
+                    name=dev_data['name'],
+                    ip=dev_data['ip'],
+                    vendor=vendor,
+                    device_type=device_type,
+                    os_version=dev_data.get('os_version', ''),
+                    model=dev_data.get('model', '')
+                )
+                current_topology.add_device(dev)
+                device_ports[dev.ip] = dev_data.get('port', 23)
+            print(f"已加载 {len(current_topology.devices)} 个设备")
+        except Exception as e:
+            print(f"加载拓扑失败：{e}")
+    
+    if saved_llm:
+        try:
+            provider = ProviderType(saved_llm.get('provider', 'openai'))
+            endpoint = saved_llm.get('endpoint', '')
+            model = saved_llm.get('model', '')
+            llm_config = LLMConfig(provider=provider, endpoint=endpoint, api_key='', model=model)
+            llm_client = LLMClient(llm_config)
+            print(f"已加载 LLM 配置：{endpoint} - {model}")
+        except Exception as e:
+            print(f"加载 LLM 配置失败：{e}")
+
+initialize_from_saved()
+
+# 设备执行函数（简化版）
+def execute_on_device(ip, command, port=23, username='', password=''):
+    """执行设备命令"""
+    import socket
+    import time
+    
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(10)
+    sock.connect((ip, port))
+    
+    # 读取欢迎信息
+    data_recv = sock.recv(4096).decode('utf-8', errors='ignore')
+    
+    # 中断自动配置
+    if 'automatic configuration' in data_recv.lower():
+        sock.send(b'\x04')  # Ctrl+D
+        time.sleep(2)
+        sock.send(b'\r\n')
+        time.sleep(2)
+        data_recv = sock.recv(4096).decode('utf-8', errors='ignore')
+    
+    # 登录
+    data_lower = data_recv.lower()
+    if any(x in data_lower for x in ['login', 'username', 'user name']):
+        if username:
+            sock.send((username + '\r\n').encode())
+            time.sleep(1)
+            sock.recv(4096)
+        if password:
+            sock.send((password + '\r\n').encode())
+            time.sleep(1)
+            sock.recv(4096)
+    
+    # 进入系统视图
+    needs_system = any(x in command.lower() for x in ['vlan', 'interface', 'ospf', 'bgp', 'ip route', 'port-security'])
+    if needs_system:
+        sock.send(b'system-view\r\n')
+        time.sleep(2)
+        sock.recv(4096)
+    
+    # 执行命令
+    sock.send((command + '\r\n').encode())
+    time.sleep(2)
+    
+    # 读取输出
+    output = ""
+    for _ in range(5):
+        try:
+            sock.settimeout(1)
+            chunk = sock.recv(4096).decode('utf-8', errors='ignore')
+            if chunk:
+                output += chunk
+        except:
+            break
+    
+    # 退出
+    if needs_system:
+        sock.send(b'quit\r\n')
+        time.sleep(1)
+    
+    sock.close()
+    return output.strip() if output else "执行成功（无输出）"
+
+# AI 对话接口（简化版 - 直接调用 LLM）
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    """AI 对话 - 直接调用 LLM"""
+    global llm_client, current_topology, device_ports
+    
+    data = request.json
+    user_message = data.get('message', '')
+    if not user_message:
+        return jsonify({'success': False, 'message': '消息不能为空'})
+    
+    # 构建上下文
+    context = ""
+    if current_topology and current_topology.devices:
+        context = f"当前网络拓扑：\n设备数量：{len(current_topology.devices)}\n\n"
+        for dev in current_topology.devices[:5]:
+            context += f"- {dev.name} ({dev.ip}) - {dev.vendor.value}\n"
+    
+    # 调用 LLM
+    if llm_client and llm_config:
+        try:
+            system_prompt = """你是一个网络设备配置执行器。用户会让你配置 H3C 设备。
+
+【规则】
+1. 只输出命令，不要任何解释
+2. 不要步骤，不要说明
+3. 直接返回要执行的命令
+
+【H3C 命令示例】
+- 创建 VLAN: vlan batch 10 20
+- 查看 VLAN: display vlan
+- 配置端口：interface GigabitEthernet 0/0/1
+
+用户说"做 vlan"必须返回"vlan batch X"，说"查看"返回"display X"。绝对不要返回 interface 除非用户明确要求配置接口！"""
+            
+            llm_instruction = "你是 H3C 网络设备配置助手。用户说创建/做 vlan 就返回 vlan batch 命令，说查看就返回 display 命令。只返回命令，不要任何解释！"; full_context = llm_instruction + "\\n\\n" + context; response = llm_client.chat_simple(user_message, full_context, timeout=30)
+            
+            # 提取命令（清理多余内容）
+            if response:
+                # 取第一行非空内容
+                lines = [l.strip() for l in response.split('\n') if l.strip() and not l.strip().startswith('#')]
+                exec_cmd = lines[0] if lines else response.strip()
+                
+                # 执行命令
+                if current_topology and current_topology.devices:
+                    exec_ip = list(device_ports.keys())[0]
+                    exec_port = device_ports.get(exec_ip, 23)
+                    try:
+                        result = execute_on_device(exec_ip, exec_cmd, port=exec_port)
+                        return jsonify({'success': True, 'message': f"【自动执行】\n设备：{exec_ip}:{exec_port}\n命令：{exec_cmd}\n\n【结果】\n{result}"})
+                    except Exception as e:
+                        return jsonify({'success': True, 'message': f"【命令】{exec_cmd}\n【执行失败】{str(e)}"})
+            
+            return jsonify({'success': True, 'message': response or 'LLM 无响应'})
+            
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'LLM 调用失败：{str(e)}'})
+    
+    return jsonify({'success': True, 'message': 'LLM 未配置'})
+
+
+# 设备列表 API
+@app.route('/api/devices', methods=['GET'])
+def get_devices():
+    global current_topology, device_ports
+    if not current_topology or not current_topology.devices:
+        return jsonify({'success': True, 'devices': [], 'count': 0})
+    devices = [{'id': dev.id, 'name': dev.name, 'ip': dev.ip, 'vendor': dev.vendor.value, 'port': device_ports.get(dev.ip, 23)} for dev in current_topology.devices]
+    return jsonify({'success': True, 'devices': devices, 'count': len(devices)})
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+# LLM 配置 API
+@app.route('/api/llm/config', methods=['POST'])
+def save_llm_config():
+    global llm_config, llm_client
+    data = request.json
+    provider = ProviderType(data.get('provider', 'openai'))
+    endpoint = data.get('endpoint', '')
+    api_key = data.get('api_key', '')
+    model = data.get('model', '')
+    
+    llm_config = LLMConfig(provider=provider, endpoint=endpoint, api_key=api_key, model=model)
+    llm_client = LLMClient(llm_config)
+    llm_config.save()
+    persist_llm_config({'provider': provider.value, 'endpoint': endpoint, 'api_key': api_key, 'model': model})
+    
+    return jsonify({'success': True, 'provider': provider.value, 'endpoint': endpoint, 'api_key': api_key, 'model': model})
+
+@app.route('/api/llm/test', methods=['POST'])
+def test_llm():
+    data = request.json
+    provider = data.get('provider', 'openai')
+    endpoint = data.get('endpoint', '')
+    api_key = data.get('api_key', '')
+    
+    try:
+        config = LLMConfig(provider=ProviderType(provider), endpoint=endpoint, api_key=api_key, model='')
+        client = LLMClient(config)
+        models = client.list_models()
+        return jsonify({'success': True, 'models': models[:20]})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+# 设备管理 API
+@app.route('/api/device/add', methods=['POST'])
+def add_device():
+    global current_topology, device_ports
+    
+    data = request.json
+    device_ip = data.get('device_ip')
+    connect_type = data.get('connect_type', 'ssh')
+    port = int(data.get('port', 22 if connect_type == 'ssh' else 23))
+    username = data.get('username', '')
+    password = data.get('password', '')
+    
+    # 解析 IP:端口格式
+    if ':' in device_ip:
+        ip_parts = device_ip.rsplit(':', 1)
+        try:
+            device_ip = ip_parts[0]
+            port = int(ip_parts[1])
+        except:
+            pass
+    
+    if not current_topology:
+        current_topology = Topology()
+    
+    vendor = Vendor.H3C if 'h3c' in data.get('vendor', '').lower() else Vendor.UNKNOWN
+    device_type = DeviceType.SWITCH_L3
+    
+    device = Device(
+        id=device_ip,
+        name=f"H3C-{device_ip}",
+        ip=device_ip,
+        vendor=vendor,
+        device_type=device_type,
+        os_version='',
+        model='H3C Device'
+    )
+    
+    current_topology.add_device(device)
+    device_ports[device_ip] = port
+    
+    topo_data = topology_to_dict(current_topology)
+    save_topology(topo_data)
+    
+    return jsonify({
+        'success': True,
+        'message': f'已添加设备 {device_ip}:{port}',
+        'device': {'id': device.id, 'name': device.name, 'ip': device.ip, 'vendor': vendor.value},
+        'topology': topo_data
+    })
+
+def topology_to_dict(topology):
+    """拓扑转字典"""
+    return {
+        'devices': [
+            {
+                'id': dev.id, 'name': dev.name, 'ip': dev.ip,
+                'vendor': dev.vendor.value, 'model': dev.model,
+                'device_type': dev.device_type.value, 'port': device_ports.get(dev.ip, 23)
+            }
+            for dev in topology.devices
+        ],
+        'links': [],
+        'device_count': len(topology.devices),
+        'link_count': 0
+    }
+
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=5001, debug=False, allow_unsafe_werkzeug=True)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

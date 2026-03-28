@@ -1,0 +1,547 @@
+<!-- 配置模板选择器 -->
+<div class="modal" id="template-selector-modal" onclick="if(event.target.classList.contains('modal')) document.getElementById('template-selector-modal').classList.remove('active')">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3>📋 配置模板选择器</h3>
+            <button class="btn-close" onclick="document.getElementById('template-selector-modal').classList.remove('active')">×</button>
+        </div>
+        <div class="modal-body">
+            <!-- 模板选择 -->
+            <div class="template-grid" id="template-grid">
+                <!-- 动态生成模板卡片 -->
+            </div>
+            
+            <!-- 参数表单 -->
+            <div class="template-params" id="template-params" style="display: none;">
+                <h4>⚙️ 配置参数</h4>
+                <div class="param-form" id="param-form">
+                    <!-- 动态生成表单字段 -->
+                </div>
+                
+                <!-- 设备选择 -->
+                <div class="device-selection">
+                    <h4>🖥️ 选择设备</h4>
+                    <div class="device-select-list" id="template-device-list">
+                        <!-- 设备列表 -->
+                    </div>
+                </div>
+                
+                <!-- 配置预览 -->
+                <div class="config-preview">
+                    <h4>📄 配置预览</h4>
+                    <pre id="config-preview-content">等待生成...</pre>
+                </div>
+                
+                <!-- 操作按钮 -->
+                <div class="template-actions">
+                    <button class="btn btn-primary" id="btn-apply-template">✅ 应用配置</button>
+                    <button class="btn" id="btn-preview-template">👁️ 预览配置</button>
+                    <button class="btn" onclick="document.getElementById('template-selector-modal').classList.remove('active')">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.template-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 15px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.template-card {
+    background: white;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 15px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.template-card:hover {
+    border-color: #667eea;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+}
+
+.template-card.selected {
+    border-color: #667eea;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+}
+
+.template-card-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.template-card-icon {
+    font-size: 24px;
+    margin-right: 10px;
+}
+
+.template-card-title {
+    font-weight: bold;
+    font-size: 16px;
+    color: #333;
+}
+
+.template-card-desc {
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 8px;
+}
+
+.template-card-tags {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.template-tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    background: #f0f0f0;
+    border-radius: 12px;
+    color: #666;
+}
+
+.template-tag.vendor {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
+.template-tag.category {
+    background: #f3e5f5;
+    color: #7b1fa2;
+}
+
+.param-form {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.param-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.param-group label {
+    font-weight: bold;
+    margin-bottom: 5px;
+    color: #333;
+}
+
+.param-group input,
+.param-group select {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.param-group input:focus,
+.param-group select:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.device-select-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 20px;
+}
+
+.device-checkbox {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    margin-bottom: 5px;
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+.device-checkbox input[type="checkbox"] {
+    margin-right: 10px;
+}
+
+.config-preview {
+    margin-bottom: 20px;
+}
+
+.config-preview pre {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 15px;
+    border-radius: 6px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
+    overflow-x: auto;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.template-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    padding-top: 20px;
+    border-top: 1px solid #eee;
+}
+</style>
+
+<script>
+// 模板数据
+const TEMPLATES = [
+    {
+        id: 'vlan_batch_access',
+        name: '批量 Access VLAN',
+        icon: '🔌',
+        description: '给多个接口批量配置 Access VLAN',
+        vendor: 'huawei',
+        category: 'vlan',
+        params: [
+            { name: 'vlan_id', label: 'VLAN ID', type: 'number', required: true, placeholder: '例如：10' },
+            { name: 'interfaces', label: '接口范围', type: 'text', required: true, placeholder: '例如：GE0/0/1-4' }
+        ],
+        template: `interface range {{interfaces}}
+port link-type access
+port default vlan {{vlan_id}}
+quit`
+    },
+    {
+        id: 'vlan_batch_cisco',
+        name: '批量 VLAN (Cisco)',
+        icon: '🔌',
+        description: '思科设备批量配置 Access VLAN',
+        vendor: 'cisco',
+        category: 'vlan',
+        params: [
+            { name: 'vlan_id', label: 'VLAN ID', type: 'number', required: true, placeholder: '例如：10' },
+            { name: 'interfaces', label: '接口范围', type: 'text', required: true, placeholder: '例如：GigabitEthernet0/1-4' }
+        ],
+        template: `interface range {{interfaces}}
+switchport mode access
+switchport access vlan {{vlan_id}}
+exit`
+    },
+    {
+        id: 'trunk_config',
+        name: 'Trunk 接口配置',
+        icon: '🔗',
+        description: '配置接口为 Trunk 并允许指定 VLAN',
+        vendor: 'huawei',
+        category: 'vlan',
+        params: [
+            { name: 'interface', label: '接口名', type: 'text', required: true, placeholder: '例如：GE0/0/24' },
+            { name: 'allowed_vlans', label: '允许的 VLAN', type: 'text', required: true, placeholder: '例如：10 20 30' }
+        ],
+        template: `interface {{interface}}
+port link-type trunk
+port trunk allow-pass vlan {{allowed_vlans}}
+quit`
+    },
+    {
+        id: 'svi_config',
+        name: 'SVI 网关配置',
+        icon: '🌐',
+        description: '创建 VLAN 接口并配置 IP',
+        vendor: 'huawei',
+        category: 'vlan',
+        params: [
+            { name: 'vlan_id', label: 'VLAN ID', type: 'number', required: true, placeholder: '例如：10' },
+            { name: 'ip_address', label: 'IP 地址', type: 'text', required: true, placeholder: '例如：192.168.10.1' },
+            { name: 'subnet_mask', label: '子网掩码', type: 'text', required: true, placeholder: '例如：255.255.255.0' }
+        ],
+        template: `interface Vlanif{{vlan_id}}
+ip address {{ip_address}} {{subnet_mask}}
+quit`
+    },
+    {
+        id: 'default_route',
+        name: '默认路由配置',
+        icon: '➡️',
+        description: '添加默认路由指向出口',
+        vendor: 'huawei',
+        category: 'routing',
+        params: [
+            { name: 'next_hop', label: '下一跳', type: 'text', required: true, placeholder: '例如：192.168.1.1' }
+        ],
+        template: `ip route-static 0.0.0.0 0.0.0.0 {{next_hop}}`
+    },
+    {
+        id: 'static_route',
+        name: '静态路由配置',
+        icon: '🛣️',
+        description: '添加静态路由',
+        vendor: 'huawei',
+        category: 'routing',
+        params: [
+            { name: 'dest_network', label: '目的网段', type: 'text', required: true, placeholder: '例如：10.0.0.0' },
+            { name: 'subnet_mask', label: '子网掩码', type: 'text', required: true, placeholder: '例如：255.0.0.0' },
+            { name: 'next_hop', label: '下一跳', type: 'text', required: true, placeholder: '例如：192.168.1.1' }
+        ],
+        template: `ip route-static {{dest_network}} {{subnet_mask}} {{next_hop}}`
+    },
+    {
+        id: 'ospf_basic',
+        name: 'OSPF 基础配置',
+        icon: '🔄',
+        description: '启用 OSPF 并配置区域',
+        vendor: 'huawei',
+        category: 'routing',
+        params: [
+            { name: 'process_id', label: '进程 ID', type: 'number', required: true, placeholder: '例如：1' },
+            { name: 'area_id', label: '区域 ID', type: 'text', required: true, placeholder: '例如：0' },
+            { name: 'network', label: '宣告网段', type: 'text', required: true, placeholder: '例如：192.168.10.0' },
+            { name: 'wildcard_mask', label: '反掩码', type: 'text', required: true, placeholder: '例如：0.0.0.255' }
+        ],
+        template: `ospf {{process_id}}
+area {{area_id}}
+network {{network}} {{wildcard_mask}}
+quit
+quit`
+    },
+    {
+        id: 'port_security',
+        name: '端口安全配置',
+        icon: '🔒',
+        description: '配置端口安全（最大 MAC 数）',
+        vendor: 'huawei',
+        category: 'security',
+        params: [
+            { name: 'interface', label: '接口名', type: 'text', required: true, placeholder: '例如：GE0/0/1' },
+            { name: 'max_mac', label: '最大 MAC 数', type: 'number', required: true, placeholder: '例如：2' }
+        ],
+        template: `interface {{interface}}
+port-security enable
+port-security max-mac-count {{max_mac}}
+quit`
+    },
+    {
+        id: 'interface_desc',
+        name: '接口描述配置',
+        icon: '📝',
+        description: '给接口添加描述',
+        vendor: 'all',
+        category: 'interface',
+        params: [
+            { name: 'interface', label: '接口名', type: 'text', required: true, placeholder: '例如：GE0/0/1' },
+            { name: 'description', label: '描述文本', type: 'text', required: true, placeholder: '例如：Link to SW-Access-1' }
+        ],
+        template: `interface {{interface}}
+description {{description}}
+quit`
+    },
+    {
+        id: 'switch_init',
+        name: '新交换机初始化',
+        icon: '🆕',
+        description: '新交换机基础配置模板',
+        vendor: 'huawei',
+        category: 'init',
+        params: [
+            { name: 'hostname', label: '设备名', type: 'text', required: true, placeholder: '例如：SW-Access-1' },
+            { name: 'mgmt_vlan', label: '管理 VLAN', type: 'number', required: true, placeholder: '例如：100' },
+            { name: 'mgmt_ip', label: '管理 IP', type: 'text', required: true, placeholder: '例如：192.168.100.1' },
+            { name: 'subnet_mask', label: '子网掩码', type: 'text', required: true, placeholder: '例如：255.255.255.0' },
+            { name: 'gateway', label: '默认网关', type: 'text', required: true, placeholder: '例如：192.168.100.254' }
+        ],
+        template: `sysname {{hostname}}
+vlan batch {{mgmt_vlan}}
+interface Vlanif{{mgmt_vlan}}
+ip address {{mgmt_ip}} {{subnet_mask}}
+quit
+ip route-static 0.0.0.0 0.0.0.0 {{gateway}}
+aaa
+local-user admin password irreversible-cipher Admin@123
+local-user admin privilege level 15
+local-user admin service-type ssh
+quit
+stelnet server enable`
+    }
+];
+
+let selectedTemplate = null;
+
+// 初始化模板选择器
+function initTemplateSelector() {
+    const grid = document.getElementById('template-grid');
+    grid.innerHTML = '';
+    
+    TEMPLATES.forEach(tpl => {
+        const card = document.createElement('div');
+        card.className = 'template-card';
+        card.onclick = () => selectTemplate(tpl.id, card);
+        
+        card.innerHTML = `
+            <div class="template-card-header">
+                <span class="template-card-icon">${tpl.icon}</span>
+                <span class="template-card-title">${tpl.name}</span>
+            </div>
+            <div class="template-card-desc">${tpl.description}</div>
+            <div class="template-card-tags">
+                <span class="template-tag vendor">${tpl.vendor}</span>
+                <span class="template-tag category">${tpl.category}</span>
+            </div>
+        `;
+        
+        grid.appendChild(card);
+    });
+}
+
+// 选择模板
+function selectTemplate(templateId, cardElement) {
+    // 取消其他选中
+    document.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'));
+    cardElement.classList.add('selected');
+    
+    // 找到模板数据
+    selectedTemplate = TEMPLATES.find(t => t.id === templateId);
+    
+    // 显示参数表单
+    document.getElementById('template-selector-modal').classList.remove('active');
+    document.getElementById('template-params-form-modal').classList.add('active');
+    
+    // 生成参数表单
+    generateParamForm(selectedTemplate);
+    
+    // 加载设备列表
+    loadDeviceListForTemplate();
+}
+
+// 生成参数表单
+function generateParamForm(template) {
+    const form = document.getElementById('param-form');
+    form.innerHTML = '';
+    
+    template.params.forEach(param => {
+        const group = document.createElement('div');
+        group.className = 'param-group';
+        
+        let input;
+        if (param.type === 'number') {
+            input = `<input type="number" id="param-${param.name}" placeholder="${param.placeholder}" ${param.required ? 'required' : ''}>`;
+        } else {
+            input = `<input type="text" id="param-${param.name}" placeholder="${param.placeholder}" ${param.required ? 'required' : ''}>`;
+        }
+        
+        group.innerHTML = `
+            <label>${param.label}</label>
+            ${input}
+        `;
+        
+        form.appendChild(group);
+    });
+    
+    // 绑定预览事件
+    form.querySelectorAll('input').forEach(input => {
+        input.addEventListener('input', previewConfig);
+    });
+}
+
+// 加载设备列表
+function loadDeviceListForTemplate() {
+    const deviceList = document.getElementById('template-device-list');
+    deviceList.innerHTML = '';
+    
+    // 从全局获取设备列表
+    if (window.topologyCanvas && window.topologyCanvas.devices) {
+        window.topologyCanvas.devices.forEach(dev => {
+            const div = document.createElement('div');
+            div.className = 'device-checkbox';
+            div.innerHTML = `
+                <input type="checkbox" id="device-${dev.id}" value="${dev.id}">
+                <label for="device-${dev.id}">${dev.name} (${dev.ip})</label>
+            `;
+            deviceList.appendChild(div);
+        });
+    }
+}
+
+// 预览配置
+function previewConfig() {
+    if (!selectedTemplate) return;
+    
+    const params = {};
+    selectedTemplate.params.forEach(param => {
+        const input = document.getElementById(`param-${param.name}`);
+        if (input) {
+            params[param.name] = input.value;
+        }
+    });
+    
+    // 渲染模板
+    let config = selectedTemplate.template;
+    Object.keys(params).forEach(key => {
+        config = config.replace(new RegExp(`{{${key}}}`, 'g'), params[key] || `{{${key}}}`);
+    });
+    
+    document.getElementById('config-preview-content').textContent = config;
+}
+
+// 应用配置
+function applyTemplate() {
+    if (!selectedTemplate) return;
+    
+    // 收集参数
+    const params = {};
+    selectedTemplate.params.forEach(param => {
+        const input = document.getElementById(`param-${param.name}`);
+        if (input) {
+            params[param.name] = input.value;
+        }
+    });
+    
+    // 收集选中的设备
+    const selectedDevices = [];
+    document.querySelectorAll('#template-device-list input[type="checkbox"]:checked').forEach(cb => {
+        selectedDevices.push(cb.value);
+    });
+    
+    if (selectedDevices.length === 0) {
+        alert('请至少选择一台设备');
+        return;
+    }
+    
+    // 发送配置请求
+    fetch('/api/template/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            template_id: selectedTemplate.id,
+            params: params,
+            devices: selectedDevices
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            alert('配置已下发！');
+            document.getElementById('template-params-form-modal').classList.remove('active');
+        } else {
+            alert('配置失败：' + data.message);
+        }
+    })
+    .catch(err => {
+        alert('请求失败：' + err.message);
+    });
+}
+
+// 初始化
+document.addEventListener('DOMContentLoaded', function() {
+    initTemplateSelector();
+    
+    // 绑定应用按钮
+    document.getElementById('btn-apply-template')?.addEventListener('click', applyTemplate);
+    document.getElementById('btn-preview-template')?.addEventListener('click', previewConfig);
+});
+</script>

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetOps AI - Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; color: #0f0; font-family: Consolas, monospace; }
+        
+        /* Header */
+        .header { background: #0a0a0a; padding: 10px 20px; border-bottom: 1px solid #004400; }
+        .header h1 { color: #0f0; font-size: 16px; }
+        
+        /* Toolbar */
+        .toolbar { 
+            background: #111; 
+            padding: 15px 20px; 
+            border-bottom: 1px solid #004400;
+            display: flex; 
+            gap: 15px; 
+        }
+        
+        /* Buttons */
+        .btn { 
+            background: #000; 
+            color: #0f0; 
+            border: 1px solid #0f0; 
+            padding: 10px 20px; 
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .btn:hover { background: #0f0; color: #000; }
+        
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.active { display: flex; }
+        .modal-content {
+            background: #111;
+            border: 2px solid #0f0;
+            padding: 30px;
+            width: 400px;
+        }
+        .modal h2 { margin-bottom: 20px; color: #0f0; }
+        .modal p { margin-bottom: 20px; color: #080; }
+        
+        /* Main content */
+        .main { display: flex; height: calc(100vh - 120px); }
+        .sidebar { width: 250px; background: #111; border-right: 1px solid #004400; padding: 20px; }
+        .canvas { flex: 1; background: #000; }
+        
+        /* Chat panel */
+        .chat { 
+            position: fixed; 
+            bottom: 0; left: 0; right: 0; 
+            height: 150px; 
+            background: #111; 
+            border-top: 2px solid #0f0;
+            padding: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>NETOPS AI - 网络工程师智能助手</h1>
+    </div>
+    
+    <div class="toolbar">
+        <button class="btn" id="btn-add">➕ 添加设备</button>
+        <button class="btn" id="btn-settings">⚙️ 模型设置</button>
+        <button class="btn" id="btn-chat">🤖 AI 对话</button>
+    </div>
+    
+    <div class="main">
+        <div class="sidebar">
+            <h3 style="color:#0f0; margin-bottom:15px;">网络设备</h3>
+            <p style="color:#080;">暂无设备</p>
+        </div>
+        <div class="canvas"></div>
+    </div>
+    
+    <div class="chat">
+        <p>🤖 AI 助手: 你好！我是NetOps AI助手</p>
+    </div>
+    
+    <!-- Modal: Add Device -->
+    <div class="modal" id="modal-add">
+        <div class="modal-content">
+            <h2>添加设备</h2>
+            <p>连接方式: SSH / Telnet / 串口</p>
+            <p>设备IP: <input type="text" style="background:#000; color:#0f0; border:1px solid #0f0; padding:5px;"></p>
+            <button class="btn" onclick="document.getElementById('modal-add').classList.remove('active')">关闭</button>
+        </div>
+    </div>
+    
+    <!-- Modal: Settings -->
+    <div class="modal" id="modal-settings">
+        <div class="modal-content">
+            <h2>模型设置</h2>
+            <p>接入方式: OpenAI / Anthropic / 自定义</p>
+            <button class="btn" onclick="document.getElementById('modal-settings').classList.remove('active')">关闭</button>
+        </div>
+    </div>
+    
+    <script>
+        console.log('Script loaded');
+        
+        document.getElementById('btn-add').onclick = function() {
+            console.log('Add button clicked');
+            document.getElementById('modal-add').classList.add('active');
+        };
+        
+        document.getElementById('btn-settings').onclick = function() {
+            console.log('Settings button clicked');
+            document.getElementById('modal-settings').classList.add('active');
+        };
+        
+        document.getElementById('btn-chat').onclick = function() {
+            alert('AI对话功能');
+        };
+    </script>
+</body>
+</html>

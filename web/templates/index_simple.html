@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>NetOps AI - Local LLM</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #eee; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .card { background: #16213e; padding: 20px; margin: 20px 0; border-radius: 8px; }
+        input, select, button { padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; }
+        button { background: #e94560; color: white; border: none; cursor: pointer; }
+        button:hover { background: #ff6b6b; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .success { background: #0f3460; border-left: 4px solid #4caf50; }
+        .error { background: #0f3460; border-left: 4px solid #f44336; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>NetOps AI - 本地 LLM 配置</h1>
+        
+        <div class="card">
+            <h3>LLM 设置</h3>
+            <label>Provider</label>
+            <select id="provider">
+                <option value="openai">OpenAI 兼容 (推荐本地 LLM)</option>
+                <option value="custom">自定义</option>
+            </select>
+            
+            <label>API Endpoint (必填)</label>
+            <input type="text" id="endpoint" placeholder="http://localhost:11434/v1">
+            
+            <label>API Key</label>
+            <input type="text" id="api-key" placeholder="ollama (或留空)">
+            
+            <label>Model 名称</label>
+            <input type="text" id="model" placeholder="qwen2.5:7b">
+            
+            <button onclick="saveConfig()">保存配置</button>
+            <button onclick="testConfig()" style="background:#0f3460">测试连接</button>
+        </div>
+        
+        <div id="result"></div>
+        
+        <div class="card">
+            <h3>本地 LLM 示例</h3>
+            <p><strong>Ollama:</strong></p>
+            <ul>
+                <li>Endpoint: http://localhost:11434/v1</li>
+                <li>API Key: ollama (或留空)</li>
+                <li>Model: qwen2.5:7b, llama3:8b, 等</li>
+            </ul>
+            <p><strong>vLLM:</strong></p>
+            <ul>
+                <li>Endpoint: http://localhost:8000/v1</li>
+                <li>API Key: 留空</li>
+                <li>Model: 你的模型名</li>
+            </ul>
+        </div>
+    </div>
+    
+    <script>
+        const resultDiv = document.getElementById('result');
+        
+        function showResult(success, message) {
+            resultDiv.innerHTML = '<div class="status ' + (success ? 'success' : 'error') + '">' + message + '</div>';
+        }
+        
+        function saveConfig() {
+            const provider = document.getElementById('provider').value;
+            const endpoint = document.getElementById('endpoint').value;
+            const apiKey = document.getElementById('api-key').value;
+            const model = document.getElementById('model').value;
+            
+            // Clean special chars
+            const clean = (s) => String(s || '').replace(/[<>]/g, '').trim();
+            
+            fetch('/api/llm/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider: clean(provider),
+                    endpoint: clean(endpoint),
+                    api_key: clean(apiKey),
+                    model: clean(model)
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showResult(true, '保存成功！<br>Provider: ' + data.provider + '<br>Endpoint: ' + data.endpoint + '<br>Model: ' + data.model);
+                } else {
+                    showResult(false, '保存失败：' + data.message);
+                }
+            })
+            .catch(err => showResult(false, '请求失败：' + err));
+        }
+        
+        function testConfig() {
+            const endpoint = document.getElementById('endpoint').value;
+            const apiKey = document.getElementById('api-key').value;
+            
+            fetch('/api/llm/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ endpoint, api_key: apiKey })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showResult(true, data.message + (data.models ? '<br>可用模型：<br>' + data.models.join(', ') : ''));
+                } else {
+                    showResult(false, data.message);
+                }
+            })
+            .catch(err => showResult(false, '测试失败：' + err));
+        }
+        
+        // Load saved config
+        fetch('/api/llm/config')
+            .then(r => r.json())
+            .then(data => {
+                if (data && data.endpoint) {
+                    document.getElementById('endpoint').value = data.endpoint;
+                    document.getElementById('api-key').value = data.api_key || '';
+                    document.getElementById('model').value = data.model || '';
+                }
+            })
+            .catch(() => {});
+    </script>
+</body>
+</html>

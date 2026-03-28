@@ -1,0 +1,19 @@
+﻿{
+  "devices": [
+    {
+      "id": "127.0.0.1",
+      "name": "H3C-127.0.0.1",
+      "ip": "127.0.0.1",
+      "vendor": "h3c",
+      "model": "H3C Device",
+      "device_type": "switch_l3",
+      "os_version": "",
+      "port": 30001,
+      "vrrp_master": null,
+      "interfaces": []
+    }
+  ],
+  "links": [],
+  "device_count": 1,
+  "link_count": 0
+}

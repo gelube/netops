@@ -1,0 +1,242 @@
+<!-- 诊断结果对话框 -->
+<div class="modal" id="diagnosis-modal" onclick="if(event.target.classList.contains('modal')) document.getElementById('diagnosis-modal').classList.remove('active')">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3 id="diagnosis-title">🔍 诊断报告</h3>
+            <button class="btn-close" onclick="document.getElementById('diagnosis-modal').classList.remove('active')">×</button>
+        </div>
+        <div class="modal-body">
+            <!-- 诊断摘要 -->
+            <div class="diagnosis-summary" id="diagnosis-summary">
+                <div class="summary-item">
+                    <span class="summary-label">诊断类型:</span>
+                    <span class="summary-value" id="diag-type">-</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">状态:</span>
+                    <span class="summary-value" id="diag-status">-</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">根因:</span>
+                    <span class="summary-value" id="diag-cause">-</span>
+                </div>
+            </div>
+            
+            <!-- 诊断步骤 -->
+            <div class="diagnosis-steps" id="diagnosis-steps">
+                <h4>诊断步骤</h4>
+                <div class="step-list" id="step-list">
+                    <!-- 动态生成 -->
+                </div>
+            </div>
+            
+            <!-- 修复建议 -->
+            <div class="diagnosis-suggestions" id="diagnosis-suggestions" style="display: none;">
+                <h4>💡 修复建议</h4>
+                <div class="suggestion-list" id="suggestion-list">
+                    <!-- 动态生成 -->
+                </div>
+                <div class="suggestion-actions">
+                    <button class="btn btn-primary" id="btn-apply-fix">一键执行修复</button>
+                    <button class="btn" onclick="document.getElementById('diagnosis-modal').classList.remove('active')">稍后处理</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal-large {
+    max-width: 900px;
+}
+
+.diagnosis-summary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+}
+
+.summary-item {
+    text-align: center;
+}
+
+.summary-label {
+    display: block;
+    font-size: 12px;
+    opacity: 0.9;
+    margin-bottom: 5px;
+}
+
+.summary-value {
+    display: block;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.diagnosis-steps h4,
+.diagnosis-suggestions h4 {
+    margin: 20px 0 10px 0;
+    color: #333;
+    font-size: 16px;
+}
+
+.step-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.step-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 15px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border-left: 4px solid #ccc;
+}
+
+.step-item.pass {
+    border-left-color: #28a745;
+    background: #e8f5e9;
+}
+
+.step-item.fail {
+    border-left-color: #dc3545;
+    background: #ffebee;
+}
+
+.step-item.warn {
+    border-left-color: #ffc107;
+    background: #fff3e0;
+}
+
+.step-icon {
+    font-size: 20px;
+    margin-right: 12px;
+    width: 24px;
+    text-align: center;
+}
+
+.step-content {
+    flex: 1;
+}
+
+.step-name {
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 3px;
+}
+
+.step-message {
+    font-size: 13px;
+    color: #666;
+}
+
+.suggestion-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.suggestion-item {
+    display: flex;
+    align-items: flex-start;
+    padding: 12px 15px;
+    background: #e3f2fd;
+    border-radius: 6px;
+    border-left: 4px solid #2196f3;
+}
+
+.suggestion-icon {
+    font-size: 18px;
+    margin-right: 12px;
+}
+
+.suggestion-text {
+    flex: 1;
+    font-size: 14px;
+    color: #333;
+}
+
+.suggestion-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+</style>
+
+<script>
+// 显示诊断结果
+function showDiagnosisResult(result) {
+    const modal = document.getElementById('diagnosis-modal');
+    
+    // 填充摘要
+    document.getElementById('diag-type').textContent = result.type || '诊断';
+    document.getElementById('diag-status').textContent = result.root_cause ? '发现问题' : '正常';
+    document.getElementById('diag-cause').textContent = result.root_cause || '未发现明显问题';
+    
+    // 生成步骤列表
+    const stepList = document.getElementById('step-list');
+    stepList.innerHTML = '';
+    
+    if (result.steps && result.steps.length > 0) {
+        result.steps.forEach(step => {
+            const stepDiv = document.createElement('div');
+            stepDiv.className = `step-item ${step.status.toLowerCase()}`;
+            
+            const icon = step.status === 'PASS' ? '✅' : 
+                        step.status === 'FAIL' ? '❌' : '⚠️';
+            
+            stepDiv.innerHTML = `
+                <span class="step-icon">${icon}</span>
+                <div class="step-content">
+                    <div class="step-name">${step.step}</div>
+                    <div class="step-message">${step.message}</div>
+                </div>
+            `;
+            stepList.appendChild(stepDiv);
+        });
+    }
+    
+    // 生成建议列表
+    const suggestionList = document.getElementById('suggestion-list');
+    const suggestionDiv = document.getElementById('diagnosis-suggestions');
+    
+    if (result.suggestions && result.suggestions.length > 0) {
+        suggestionDiv.style.display = 'block';
+        suggestionList.innerHTML = '';
+        
+        result.suggestions.forEach(sug => {
+            const sugDiv = document.createElement('div');
+            sugDiv.className = 'suggestion-item';
+            sugDiv.innerHTML = `
+                <span class="suggestion-icon">💡</span>
+                <span class="suggestion-text">${sug}</span>
+            `;
+            suggestionList.appendChild(sugDiv);
+        });
+    } else {
+        suggestionDiv.style.display = 'none';
+    }
+    
+    // 显示对话框
+    modal.classList.add('active');
+}
+
+// 绑定一键修复按钮
+document.addEventListener('DOMContentLoaded', function() {
+    const btnApplyFix = document.getElementById('btn-apply-fix');
+    if (btnApplyFix) {
+        btnApplyFix.addEventListener('click', function() {
+            // TODO: 执行修复建议
+            alert('修复功能开发中...');
+        });
+    }
+});
+</script>

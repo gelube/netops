@@ -1,0 +1,288 @@
+/* NetOps AI - 拓扑Canvas样式 */
+
+/* 画布背景 - 网格效果 */
+#topology-canvas {
+    background: 
+        linear-gradient(rgba(0, 255, 0, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 255, 0, 0.03) 1px, transparent 1px);
+    background-size: 20px 20px;
+    background-color: #000;
+}
+
+/* 节点通用样式 */
+.node {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.node:hover {
+    filter: brightness(1.2);
+}
+
+.node.focused {
+    filter: drop-shadow(0 0 15px currentColor);
+}
+
+/* 设备图标 - 方块/圆形组合 */
+.device-icon {
+    fill: none;
+    stroke-width: 2;
+    transition: all 0.3s ease;
+}
+
+/* 路由器 - 圆形 */
+.device-icon.router {
+    stroke: #00ffff;
+}
+
+.device-icon.router .icon-center {
+    fill: #00ffff;
+    opacity: 0.3;
+}
+
+/* 交换机 - 方块带点 */
+.device-icon.switch_l2,
+.device-icon.switch_l3 {
+    stroke: #00ff00;
+}
+
+.device-icon.switch_l2 .icon-center,
+.device-icon.switch_l3 .icon-center {
+    fill: #00ff00;
+    opacity: 0.3;
+}
+
+/* 防火墙 - 盾牌 */
+.device-icon.firewall {
+    stroke: #ff6600;
+}
+
+.device-icon.firewall .icon-center {
+    fill: #ff6600;
+    opacity: 0.3;
+}
+
+/* 服务器 - 方框 */
+.device-icon.server {
+    stroke: #ff00ff;
+}
+
+.device-icon.server .icon-center {
+    fill: #ff00ff;
+    opacity: 0.3;
+}
+
+/* 未知设备 */
+.device-icon.unknown {
+    stroke: #888888;
+}
+
+.device-icon.unknown .icon-center {
+    fill: #888888;
+    opacity: 0.3;
+}
+
+/* 节点标签 */
+.node-label {
+    font-family: 'Consolas', monospace;
+    font-size: 12px;
+    fill: #00ff00;
+    text-anchor: middle;
+    pointer-events: none;
+}
+
+.node-ip {
+    font-size: 10px;
+    fill: #008800;
+}
+
+.node-type {
+    font-size: 9px;
+    fill: #00ffff;
+    text-anchor: middle;
+}
+
+/* 连接线 */
+.link {
+    stroke-width: 2;
+    fill: none;
+    transition: all 0.3s ease;
+}
+
+.link.physical {
+    stroke: #00ff00;
+}
+
+.link.aggregate {
+    stroke: #00ffff;
+    stroke-dasharray: none;
+}
+
+.link.vrrp {
+    stroke: #ff00ff;
+}
+
+.link.stack {
+    stroke: #ffaa00;
+}
+
+.link.ospf {
+    stroke: #00ff00;
+    stroke-dasharray: 4, 4;
+}
+
+.link.bgp {
+    stroke: #00ff00;
+    stroke-dasharray: 4, 4;
+}
+
+.link.vpn {
+    stroke: #884488;
+    stroke-dasharray: 8, 4;
+}
+
+.link.tunnel {
+    stroke: #884488;
+    stroke-dasharray: 8, 4;
+}
+
+/* 链路标签 */
+.link-label {
+    font-family: 'Consolas', monospace;
+    font-size: 9px;
+    fill: #008800;
+    background: #000;
+}
+
+/* VRRP标识 */
+.vrrp-badge {
+    fill: #ff00ff;
+    font-size: 10px;
+}
+
+/* 聚合端口标识 */
+.aggregate-badge {
+    fill: #00ffff;
+    font-size: 10px;
+}
+
+/* 焦点效果 */
+.node.focused .device-icon {
+    stroke-width: 3;
+    filter: drop-shadow(0 0 10px currentColor);
+}
+
+.node.focused .node-label {
+    fill: #00ffff;
+    font-weight: bold;
+}
+
+/* 呼吸动画 - 焦点节点 */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.node.focused .device-icon .icon-center {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* 扫描线效果 */
+@keyframes scanline {
+    0% {
+        transform: translateY(-100%);
+    }
+    100% {
+        transform: translateY(100%);
+    }
+}
+
+.scan-effect {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #00ff00, transparent);
+    animation: scanline 2s linear infinite;
+    pointer-events: none;
+}
+
+/* 图例 */
+.legend {
+    position: absolute;
+    bottom: 50px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.8);
+    border: 1px solid #004400;
+    padding: 10px;
+    font-size: 10px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+    color: #008800;
+}
+
+.legend-line {
+    width: 20px;
+    height: 2px;
+    background: currentColor;
+}
+
+.legend-line.aggregate {
+    background: #00ffff;
+    height: 3px;
+}
+
+.legend-line.vrrp {
+    background: #ff00ff;
+}
+
+.legend-line.vpn {
+    background: #884488;
+    height: 1px;
+    background: repeating-linear-gradient(90deg, #884488, #884488 4px, transparent 4px, transparent 8px);
+}
+
+/* 发现动画 */
+.discovery-mode .node {
+    opacity: 0.3;
+}
+
+.discovery-mode .node.new {
+    opacity: 1;
+    animation: node-appear 0.5s ease-out;
+}
+
+@keyframes node-appear {
+    0% {
+        transform: scale(0);
+        opacity: 0;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* 连接线动画 - 数据传输效果 */
+.data-transfer .link.active {
+    animation: data-flow 1s linear infinite;
+}
+
+@keyframes data-flow {
+    0% {
+        stroke-dashoffset: 20;
+    }
+    100% {
+        stroke-dashoffset: 0;
+    }
+}
