@@ -9,3 +9,4 @@ backups/
 .venv/
 venv/
 netbrain-mcp/
+web/server.log
