@@ -1,43 +1,56 @@
 {
   "nodes": [
     {
-      "id": "dev_1",
-      "name": "H3C",
-      "remark": "接入交换机",
-      "ip": "127.0.0.1",
-      "deviceType": "layer2_switch"
-    },
-    {
-      "id": "dev_2",
+      "id": "dev_4",
       "name": "H3C",
       "remark": "核心交换机",
       "ip": "127.0.0.1",
-      "deviceType": "layer2_switch"
+      "deviceType": "layer2_switch",
+      "x": 798.3043478260869,
+      "y": 317.6851249850293
+    },
+    {
+      "id": "dev_5",
+      "name": "H3C",
+      "remark": "接入交换机",
+      "ip": "127.0.0.1",
+      "deviceType": "layer3_switch",
+      "x": 346.57598978288627,
+      "y": 325.5977011494252
+    },
+    {
+      "id": "dev_6",
+      "name": "H3C",
+      "remark": "出口路由",
+      "ip": "127.0.0.1",
+      "deviceType": "router",
+      "x": 796.7777777777787,
+      "y": 89.96427672096672
     }
   ],
   "links": [
     {
+      "from": "dev_4",
+      "from_name": "核心交换机",
+      "from_port": "GE1/0/1",
       "id": "link_1",
-      "from": "dev_1",
-      "to": "dev_2",
-      "from_name": "接入交换机",
-      "to_name": "核心交换机",
-      "from_port": "GigabitEthernet1/0/1",
-      "to_port": "GigabitEthernet1/0/1",
-      "link_type": "port-channel-lacp",
-      "protocol": "lldp-heuristic"
+      "link_type": "unknown",
+      "protocol": "lldp",
+      "to": "dev_5",
+      "to_name": "接入交换机",
+      "to_port": "GE1/0/1"
     },
     {
+      "from": "dev_4",
+      "from_name": "核心交换机",
+      "from_port": "GE1/0/2",
       "id": "link_2",
-      "from": "dev_1",
-      "to": "dev_2",
-      "from_name": "接入交换机",
-      "to_name": "核心交换机",
-      "from_port": "GigabitEthernet1/0/2",
-      "to_port": "GigabitEthernet1/0/2",
-      "link_type": "port-channel-lacp",
-      "protocol": "lldp-heuristic"
+      "link_type": "unknown",
+      "protocol": "lldp",
+      "to": "dev_6",
+      "to_name": "出口路由",
+      "to_port": "GE0/0/0"
     }
   ],
-  "version": 141
+  "version": 1180
 }

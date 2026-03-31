@@ -1,20 +1,6 @@
 [
   {
-    "id": "dev_1",
-    "name": "H3C",
-    "ip": "127.0.0.1",
-    "port": 30001,
-    "conn_type": "telnet",
-    "remark": "接入交换机",
-    "username": "",
-    "password": "",
-    "vendor": "h3c",
-    "device_type": "layer2_switch",
-    "model": "Comware",
-    "os_version": "Version"
-  },
-  {
-    "id": "dev_2",
+    "id": "dev_4",
     "name": "H3C",
     "ip": "127.0.0.1",
     "port": 30002,
@@ -25,6 +11,60 @@
     "vendor": "h3c",
     "device_type": "layer2_switch",
     "model": "unknown",
-    "os_version": "unknown"
+    "os_version": "unknown",
+    "facts": {
+      "vlan_count": 0,
+      "up_interfaces": 0,
+      "total_interfaces": 2,
+      "trunk_ports": [],
+      "vlan_list": [],
+      "last_collected": "2026-03-31T11:10:13.657297"
+    }
+  },
+  {
+    "id": "dev_5",
+    "name": "H3C",
+    "ip": "127.0.0.1",
+    "port": 30001,
+    "conn_type": "telnet",
+    "remark": "接入交换机",
+    "username": "",
+    "password": "",
+    "vendor": "h3c",
+    "device_type": "layer3_switch",
+    "model": "unknown",
+    "os_version": "unknown",
+    "facts": {
+      "vlan_count": 1,
+      "up_interfaces": 0,
+      "total_interfaces": 36,
+      "trunk_ports": [],
+      "vlan_list": [
+        1
+      ],
+      "last_collected": "2026-03-31T18:19:40.750393"
+    }
+  },
+  {
+    "id": "dev_6",
+    "name": "H3C",
+    "ip": "127.0.0.1",
+    "port": 30003,
+    "conn_type": "telnet",
+    "remark": "出口路由",
+    "username": "",
+    "password": "",
+    "vendor": "h3c",
+    "device_type": "router",
+    "model": "unknown",
+    "os_version": "unknown",
+    "facts": {
+      "vlan_count": 0,
+      "up_interfaces": 0,
+      "total_interfaces": 0,
+      "trunk_ports": [],
+      "vlan_list": [],
+      "last_collected": "2026-03-31T11:09:02.276174"
+    }
   }
 ]
