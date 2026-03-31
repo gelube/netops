@@ -249,128 +249,571 @@ def _extract_topology_links(text, local_name):
 
     return links
 
+def ensure_lldp_on_all_devices(devices):
+    """在拓扑发现前，直连每台设备确保 LLDP 已启用"""
+    from netops_tools import NetOpsTools
+    tools = NetOpsTools()
+    for d in devices:
+        dev_name = d.get('remark') or d.get('name')
+        conn_type = d.get('conn_type', 'ssh')
+        vendor = (d.get('vendor') or '').lower()
+        if not d.get('ip') and not d.get('serial_port'):
+            continue
+        try:
+            # 先检查 LLDP 是否已启用
+            if conn_type == 'telnet':
+                r = tools._telnet_connect(dev_name, ["display lldp neighbor-information list"])
+            else:
+                r = tools._ssh_connect(dev_name, ["display lldp neighbor-information list"])
+            if not r.get('success'):
+                continue
+            output = r.get('results', [{}])[0].get('output', '')
+            # 如果 LLDP 未配置，自动启用
+            if 'not configured' in output.lower() or '未启用' in output or 'not enabled' in output.lower():
+                print(f"  LLDP 未启用，正在启用: {dev_name}")
+                # 先试 lldp enable（交换机），失败再试 lldp global enable（路由器）
+                lldp_cmds = ["lldp enable", "lldp global enable"]
+                enabled = False
+                for cmd in lldp_cmds:
+                    if conn_type == 'telnet':
+                        r2 = tools._telnet_connect(dev_name, [cmd])
+                    else:
+                        r2 = tools._ssh_connect(dev_name, [cmd])
+                    out2 = r2.get('results', [{}])[0].get('output', '') if r2.get('success') else ''
+                    err = 'unrecognized' in out2.lower() or 'wrong' in out2.lower()
+                    if not err:
+                        print(f"  {dev_name}: LLDP 已启用 ({cmd})")
+                        enabled = True
+                        break
+                if not enabled:
+                    print(f"  {dev_name}: LLDP 不受支持，跳过")
+        except Exception as e:
+            print(f"  {dev_name}: 检查 LLDP 失败 - {e}")
+
+
 @app.route('/api/topology/discover', methods=['POST'])
 def topology_discover():
-    """基于 LLDP/CDP 自动发现拓扑关系"""
+    """拓扑发现：先确保 LLDP 启用，再 LLM 执行命令提取链路"""
     try:
+        import re as _re
         devices = load_devices()
-        links = []
-        unknown_peer_ports = {}
-
-        discover_cmds = [
-            'display lldp neighbor-information',
-            'display lldp neighbor brief',
-            'show lldp neighbors detail',
-            'show cdp neighbors detail',
-            'show lldp neighbors'
-        ]
-
-        for d in devices:
-            conn_type = d.get('conn_type', 'ssh')
-            tool_name = 'telnet_connect' if conn_type == 'telnet' else 'ssh_connect'
-
-            if conn_type == 'ssh' and (not d.get('username') or not d.get('password')):
-                continue
-
-            res = tools.execute_tool(tool_name, {'device': d.get('name'), 'commands': discover_cmds})
-            if not res.get('success'):
-                continue
-
-            text = ''
-            for item in res.get('results', []):
-                text += '\n' + (item.get('output') or '')
-
-            local_name = d.get('remark') or d.get('name')
-            parsed = _extract_topology_links(text, local_name)
-            known = [x for x in parsed if x.get('to_name')]
-            unknown = [x for x in parsed if not x.get('to_name')]
-            links.extend(known)
-            if unknown:
-                unknown_peer_ports.setdefault(local_name, [])
-                unknown_peer_ports[local_name].extend([x.get('from_port') for x in unknown if x.get('from_port')])
-
-        # 去重
-        uniq = []
-        seen = set()
-        for l in links:
-            key = (l['from_name'], l['to_name'], l.get('from_port', ''), l.get('to_port', ''))
-            rkey = (l['to_name'], l['from_name'], l.get('to_port', ''), l.get('from_port', ''))
-            if key in seen or rkey in seen:
-                continue
-            seen.add(key)
-            uniq.append(l)
-
-        # 兜底：双设备实验环境常出现只识别到本端口、无对端名称。
-        if not uniq and len(devices) == 2:
-            a = devices[0].get('remark') or devices[0].get('name')
-            b = devices[1].get('remark') or devices[1].get('name')
-            a_ports = list(dict.fromkeys(unknown_peer_ports.get(a) or []))
-            b_ports = list(dict.fromkeys(unknown_peer_ports.get(b) or []))
-
-            if not a_ports:
-                a_ports = ['unknown']
-            if not b_ports:
-                b_ports = ['unknown']
-
-            # 按序配对，尽量保留多条并行物理链路
-            pair_count = max(len(a_ports), len(b_ports))
-            for i in range(pair_count):
-                pa = a_ports[i] if i < len(a_ports) else a_ports[-1]
-                pb = b_ports[i] if i < len(b_ports) else b_ports[-1]
-                uniq.append({
-                    'from_name': a,
-                    'to_name': b,
-                    'from_port': pa,
-                    'to_port': pb,
-                    'link_type': 'unknown',
-                    'protocol': 'lldp-heuristic'
-                })
-
-        # 简单聚合识别：同一设备对出现 2 条及以上并行链路，标记为端口聚合候选。
-        pair_counter = {}
-        for l in uniq:
-            pkey = tuple(sorted([l.get('from_name', ''), l.get('to_name', '')]))
-            pair_counter[pkey] = pair_counter.get(pkey, 0) + 1
-        for l in uniq:
-            pkey = tuple(sorted([l.get('from_name', ''), l.get('to_name', '')]))
-            if pair_counter.get(pkey, 0) >= 2 and (l.get('link_type') in [None, '', 'unknown']):
-                l['link_type'] = 'port-channel-lacp'
-
         state = load_topology_state()
-        state['nodes'] = [
-            {
-                'id': d.get('id'),
-                'name': d.get('name'),
-                'remark': d.get('remark', ''),
-                'ip': d.get('ip') or d.get('serial_port') or 'N/A',
-                'deviceType': d.get('device_type', 'unknown')
-            } for d in devices
-        ]
-        def find_id_by_name(name):
-            for d in devices:
-                if d.get('remark') == name or d.get('name') == name:
-                    return d.get('id')
-            return None
+        old_nodes = state.get('nodes', [])
+        
+        # 先确保所有设备 LLDP 已启用
+        ensure_lldp_on_all_devices(devices)
+        
+        PORT_RE = r'(?:GigabitEthernet|Ten-GigabitEthernet|FortyGigE|HundredGigE|XGE|10GE|40GE|100GE|Ethernet|Eth|GE|Port-channel|Vlanif|LoopBack|NULL|Vlan|Bridge-Aggregation|Route-Aggregation)\d+(?:/\d+)*(?:\.\d+)?'
+        
+        all_lldp_text = ''
+        device_lldp = {}  # 每台设备的原始 LLDP 文本
+        for d in devices:
+            dev_name = d.get('remark') or d.get('name')
+            dtype = (d.get('device_type') or '').lower()
+            vendor = (d.get('vendor') or '').lower()
+            
+            # 跳过没有IP和连接方式的设备
+            if not d.get('ip') and not d.get('serial_port'):
+                device_lldp[dev_name] = f'设备 {dev_name} 无连接地址，跳过'
+                all_lldp_text += f'\n=== {dev_name} ===\n（无连接地址，跳过）\n'
+                continue
+            
+            # 统一用 LLDP 发现，如果没开就自动启用
+            discover_cmd = f"""在 {dev_name} 上发现 LLDP 邻居，按以下步骤执行：
+1. 先执行 display lldp neighbor-information list 查看邻居
+2. 如果返回"LLDP is not configured"或"LLDP未启用"之类的提示，说明 LLDP 没开，则执行以下命令启用 LLDP：
+   - system-view
+   - lldp enable
+   - quit
+   然后再执行 display lldp neighbor-information list
+3. 如果 LLDP 已启用但没邻居，执行 display lldp neighbor-information verbose
+4. 显示所有命令的完整输出，不要省略任何端口信息。"""
 
-        state['links'] = [
-            {
-                'id': f"link_{i+1}",
-                'from': find_id_by_name(l['from_name']),
-                'to': find_id_by_name(l['to_name']),
-                'from_name': l['from_name'],
-                'to_name': l['to_name'],
-                'from_port': l.get('from_port', 'unknown'),
-                'to_port': l.get('to_port', 'unknown'),
-                'link_type': l.get('link_type', 'unknown'),
-                'protocol': l.get('protocol', 'lldp/cdp')
-            } for i, l in enumerate(uniq)
-        ]
+            chat_result = _do_chat(
+                discover_cmd,
+                dev_name
+            )
+            raw = chat_result.get("tool_outputs", "") + "\n" + chat_result.get("response", "")
+            device_lldp[dev_name] = raw
+            all_lldp_text += f'\n=== {dev_name} ===\n{raw}\n'
+            # 给方法3用
+            _last_chat_result = chat_result
+        
+        # 按段落解析 LLDP 输出，提取 本地端口→对端端口→对端设备名
+        links = []
+        for d in devices:
+            dev_name = d.get('remark') or d.get('name')
+            dev_id = d.get('id')
+            raw = device_lldp.get(dev_name, '')
+            
+            # 方法1：LLDP neighbor list 格式（有邻居名称）
+            # 例: GE1/0/1    核心交换机    GE1/0/1
+            list_pattern = _re.compile(
+                r'(' + PORT_RE + r')\s+(\S+)\s+(' + PORT_RE + r')',
+                _re.IGNORECASE
+            )
+            list_matches = list_pattern.findall(raw)
+            if list_matches:
+                for local_p, neighbor_name, remote_p in list_matches:
+                    # 在设备列表中匹配对端设备
+                    tid = None
+                    for other in devices:
+                        if other.get('id') != dev_id:
+                            on = other.get('remark') or other.get('name')
+                            if on == neighbor_name or neighbor_name in on or on in neighbor_name:
+                                tid = other.get('id')
+                                break
+                    # 如果 System Name 是通用名（如 H3C），用端口交叉验证
+                    if not tid and neighbor_name.upper() in ('H3C','HUAWEI','CISCO','SWITCH','ROUTER'):
+                        for other in devices:
+                            if other.get('id') != dev_id:
+                                other_raw = device_lldp.get(other.get('remark') or other.get('name'), '')
+                                # 检查对端设备的 LLDP 输出是否包含本设备的端口
+                                if remote_p in other_raw and local_p in other_raw:
+                                    tid = other.get('id')
+                                    break
+                    # 最终兜底：只有两台设备时直接连
+                    if not tid:
+                        others = [x for x in devices if x.get('id') != dev_id]
+                        if len(others) == 1:
+                            tid = others[0].get('id')
+                    if not tid:
+                        continue
+                    if tid:
+                        links.append({
+                            'from_name': dev_name, 'from_port': local_p,
+                            'to_name': next((x.get('remark') or x.get('name') for x in devices if x.get('id')==tid), ''),
+                            'to_port': remote_p
+                        })
+                # 如果方法1部分匹配失败，不 continue，让后续方法补全
+                if not any(l['from_name'] == dev_name for l in links):
+                    pass  # 继续到方法2
+            
+            # 方法2：按段落解析 verbose 格式（port N[本地端口] → PortID → 对端端口）
+            # 每个 "neighbor-information of port" 块是一个邻居
+            blocks = _re.split(r'LLDP neighbor-information of port', raw)
+            for block in blocks[1:]:  # 跳过第一个空块
+                local_m = _re.search(r'\d+\s*\[?(' + PORT_RE + r')\]', block)
+                remote_m = _re.search(r'PortID/subtype\s*:\s*(' + PORT_RE + r')', block)
+                # 尝试提取 System Name
+                sysname_m = _re.search(r'System Name\s*:\s*(\S+)', block, _re.IGNORECASE)
+                # 尝试提取 ChassisID (MAC)
+                chassis_m = _re.search(r'ChassisID/subtype\s*:\s*([0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})', block)
+                
+                if not local_m:
+                    continue
+                local_p = local_m.group(1)
+                remote_p = remote_m.group(1) if remote_m else 'unknown'
+                
+                # 匹配对端设备
+                tid = None
+                if sysname_m:
+                    target_name = sysname_m.group(1)
+                    for other in devices:
+                        if other.get('id') != dev_id:
+                            on = other.get('remark') or other.get('name')
+                            if target_name in on or on in target_name:
+                                tid = other.get('id')
+                                break
+                
+                if not tid:
+                    # 如果没有 System Name，不猜设备——跳过这个邻居
+                    # 避免笛卡尔积产生假链路
+                    continue
+                
+                links.append({
+                    'from_name': dev_name, 'from_port': local_p,
+                    'to_name': next((x.get('remark') or x.get('name') for x in devices if x.get('id')==tid), ''),
+                    'to_port': remote_p
+                })
+            
+            # 方法3：从 LLM 回复文本中提取（最灵活的 fallback）
+            # LLM 可能已经从 LLDP 输出推断出了邻居关系
+            if not any(l['from_name'] == dev_name for l in links):
+                llm_text = _last_chat_result.get("response", "") if '_last_chat_result' in dir() else ""
+                # 匹配 LLM 输出的链路格式：设备名 端口 -> 设备名 端口
+                llm_links = _re.findall(
+                    r'(\S+)\s+(' + PORT_RE + r')\s*[-→>]+\s*(\S+)\s+(' + PORT_RE + r')',
+                    llm_text, _re.IGNORECASE
+                )
+                for from_n, from_p, to_n, to_p in llm_links:
+                    fid = next((x.get('id') for x in devices if x.get('remark')==from_n or x.get('name')==from_n), None)
+                    tid = next((x.get('id') for x in devices if x.get('remark')==to_n or x.get('name')==to_n), None)
+                    if fid and tid:
+                        links.append({'from_name': from_n, 'from_port': from_p, 'to_name': to_n, 'to_port': to_p})
+            
+            # 方法4：单向 fallback — A 有本地端口P1+对端端口P2，匹配 B 的接口名
+            # 如果 B 的某个接口名 == A 的对端端口，假设它们直连
+            if not any(l['from_name'] == dev_name for l in links):
+                my_blocks = _re.split(r'LLDP neighbor-information of port', raw)
+                for block in my_blocks[1:]:
+                    local_m = _re.search(r'\d+\s*\[?(' + PORT_RE + r')\]', block)
+                    remote_m = _re.search(r'PortID/subtype\s*:\s*(' + PORT_RE + r')', block)
+                    if not local_m:
+                        continue
+                    local_p = local_m.group(1)
+                    remote_p = remote_m.group(1) if remote_m else 'unknown'
+                    # 尝试每台其他设备
+                    for other in devices:
+                        if other.get('id') == dev_id:
+                            continue
+                        other_raw = device_lldp.get(other.get('remark') or other.get('name'), '')
+                        # 如果对端设备的 LLDP 没数据或没邻居，但端口名匹配
+                        other_blocks = _re.split(r'LLDP neighbor-information of port', other_raw)
+                        for ob in other_blocks[1:]:
+                            olm = _re.search(r'\d+\s*\[?(' + PORT_RE + r')\]', ob)
+                            orm = _re.search(r'PortID/subtype\s*:\s*(' + PORT_RE + r')', ob)
+                            if olm and orm and orm.group(1) == local_p and olm.group(1) == remote_p:
+                                links.append({
+                                    'from_name': dev_name, 'from_port': local_p,
+                                    'to_name': other.get('remark') or other.get('name'),
+                                    'to_port': remote_p
+                                })
+                                break
+        
+        # 方法5：LLM 总结 fallback — 如果正则没提取到完整链路，让 LLM 直接分析
+        # 包括 System Name 和设备备注不匹配的情况
+        if len(links) < len(devices):
+            device_details = []
+            for d in devices:
+                dn = d.get('remark') or d.get('name')
+                dtype = d.get('device_type', 'unknown')
+                dip = d.get('ip', 'N/A')
+                device_details.append(f"- {dn} (ID: {d.get('id')}, 类型: {dtype}, IP: {dip})")
+            
+            existing_desc = ""
+            if links:
+                existing_desc = "已发现的链路（请保留这些）:\n" + "\n".join(
+                    f"  {l['from_name']} {l['from_port']} -> {l['to_name']} {l['to_port']}" for l in links
+                ) + "\n\n请在此基础上补充遗漏的链路。"
+            
+            summary_prompt = f"""根据以下各设备的 LLDP 邻居信息，推断设备之间的物理连接关系。
+
+设备列表（备注名 → 设备标识）:
+{chr(10).join(device_details)}
+
+邻居发现原始输出:
+{all_lldp_text}
+
+注意：
+- System Name 可能是设备的 sysname（如 sw1、sw2、Router），不一定是备注名
+- 需要结合 System Name、Chassis ID、端口信息综合判断哪台设备是设备列表中的哪台
+- 对端设备必须在设备列表中
+- 只返回 JSON，不要其他文字
+
+{existing_desc}
+
+请直接返回完整的 JSON 数组，每个元素包含 from_name（用备注名）, from_port, to_name（用备注名）, to_port。
+示例: [{{"from_name":"接入交换机","from_port":"GE1/0/1","to_name":"核心交换机","to_port":"GE1/0/1"}}]"""
+            
+            try:
+                llm_result = _do_chat(summary_prompt, None)
+                llm_text = llm_result.get("response", "")
+                import json as _json
+                # 提取 JSON
+                json_match = _re.search(r'\[.*\]', llm_text, _re.DOTALL)
+                if json_match:
+                    llm_links = _json.loads(json_match.group())
+                    # 用 LLM 返回的完整链路替换正则结果（LLM 有完整上下文）
+                    if llm_links:
+                        links = []
+                        for ll in llm_links:
+                            fn = ll.get('from_name','')
+                            tn = ll.get('to_name','')
+                            fid = next((x.get('id') for x in devices if x.get('remark')==fn or x.get('name')==fn), None)
+                            tid = next((x.get('id') for x in devices if x.get('remark')==tn or x.get('name')==tn), None)
+                            if fid and tid:
+                                links.append({'from_name': fn, 'from_port': ll.get('from_port','unknown'), 'to_name': tn, 'to_port': ll.get('to_port','unknown')})
+            except Exception as ex:
+                import sys as _sys
+                _sys.stderr.write(f'LLM fallback error: {ex}\n')
+        
+        port_pairs = {}
+        for l in links:
+            fid = next((x.get('id') for x in devices if x.get('remark')==l['from_name'] or x.get('name')==l['from_name']), None)
+            tid = next((x.get('id') for x in devices if x.get('remark')==l['to_name'] or x.get('name')==l['to_name']), None)
+            if not fid or not tid: continue
+            if fid > tid:
+                fid, tid = tid, fid
+                l['from_name'], l['to_name'] = l['to_name'], l['from_name']
+                l['from_port'], l['to_port'] = l['to_port'], l['from_port']
+            key = (fid, tid, l['from_port'], l['to_port'])
+            if key not in port_pairs:
+                port_pairs[key] = {'from': fid, 'to': tid, 'id': f'link_{len(port_pairs)+1}', 'from_name': l['from_name'], 'to_name': l['to_name'], 'from_port': l['from_port'], 'to_port': l['to_port'], 'link_type': 'unknown', 'protocol': 'lldp'}
+        
+        uniq = list(port_pairs.values())
+        state['nodes'] = []
+        for d in devices:
+            old = next((n for n in old_nodes if n.get('id') == d.get('id')), {})
+            state['nodes'].append({'id': d.get('id'), 'name': d.get('name'), 'remark': d.get('remark', ''), 'ip': d.get('ip') or d.get('serial_port') or 'N/A', 'deviceType': d.get('device_type', 'unknown'), 'x': old.get('x'), 'y': old.get('y')})
+        
+        state['links'] = uniq
         state['version'] = int(state.get('version', 1)) + 1
         save_topology_state(state)
-
-        return jsonify({'success': True, 'state': state, 'discovered_links': len(state['links'])})
+        
+        with open(r'Z:\netops-ai\web\data\_discover_debug.txt', 'w', encoding='utf-8') as f:
+            f.write(f'Links: {len(uniq)}\n')
+            for l in uniq: f.write(f"  {l['from_name']} {l['from_port']} -> {l['to_name']} {l['to_port']}\n")
+            f.write(f'\nRaw LLDP:\n{all_lldp_text[:3000]}\n')
+        
+        return jsonify({'success': True, 'state': state, 'discovered_links': len(uniq)})
     except Exception as e:
+        import traceback; traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)})
+
+
+def _do_chat(message, selected_device):
+    """内部调用 chat 逻辑（不经过 HTTP）"""
+    try:
+        if not os.path.exists(CONFIG_FILE):
+            return {'success': False, 'message': 'LLM 未配置'}
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        endpoint = config.get('endpoint', '')
+        api_key = config.get('api_key', '')
+        model = config.get('model', '')
+        if not endpoint or not model:
+            return {'success': False, 'message': 'LLM 未配置'}
+        
+        import requests as http_req
+        headers = {'Content-Type': 'application/json'}
+        if api_key:
+            headers['Authorization'] = f'Bearer {api_key}'
+        base = endpoint.rstrip('/')
+        if '/v1' not in base:
+            base += '/v1'
+        
+        devices = load_devices()
+        device_info = "\n".join([
+            f"- 备注名: {d.get('remark') or d['name']}, IP: {d.get('ip')}:{d.get('port',23)}, 连接: {d.get('conn_type','ssh')}, 厂商: {d.get('vendor','unknown')}, 型号: {d.get('model','unknown')}, 设备类型: {d.get('device_type','unknown')}"
+            for d in devices
+        ])
+        
+        system_prompt = f"""你是 NetOps AI 网络工程师助手。你可以直接操作网络设备。
+
+【设备列表】:
+{device_info}
+
+【重要规则】：
+1. 根据设备厂商选择正确的命令（华为/H3C 用 display，思科用 show）
+2. 你必须调用工具执行操作
+3. 返回结果时严格按要求格式输出
+4. H3C/华为设备启用 LLDP：
+   - 交换机（S系列）：在系统视图下执行 lldp enable
+   - 路由器（MSR/VSR系列）：在系统视图下执行 lldp global enable
+   - 区分方法：设备类型包含 router 或型号包含 MSR/VSR 的用 lldp global enable
+5. 如果设备卡在"Automatic configuration is running"，先发送 Ctrl+C 退出再执行命令"""
+        
+        # 获取工具定义
+        tools_def = []
+        if hasattr(tools, 'get_tools_definition'):
+            tools_def = tools.get_tools_definition()
+        else:
+            # 手动构建工具定义
+            tools_def = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "ssh_connect",
+                        "description": "SSH连接到网络设备执行命令",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "device": {"type": "string", "description": "设备名称或备注"},
+                                "commands": {"type": "array", "items": {"type": "string"}, "description": "要执行的命令列表"}
+                            },
+                            "required": ["device", "commands"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "telnet_connect",
+                        "description": "Telnet连接到网络设备执行命令",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "device": {"type": "string", "description": "设备名称或备注"},
+                                "commands": {"type": "array", "items": {"type": "string"}, "description": "要执行的命令列表"}
+                            },
+                            "required": ["device", "commands"]
+                        }
+                    }
+                }
+            ]
+        
+        messages = [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': message}
+        ]
+        
+        # 执行多轮 tool calling
+        all_tool_outputs = []
+        for _ in range(15):
+            payload = {
+                'model': model,
+                'messages': messages,
+                'temperature': 0.1,
+                'tools': tools_def,
+                'tool_choice': 'auto'
+            }
+            
+            resp = http_req.post(f'{base}/chat/completions', headers=headers, json=payload, timeout=120)
+            result = resp.json()
+            choices = result.get('choices', [])
+            if not choices:
+                break
+            
+            msg = choices[0].get('message', {})
+            tool_calls = msg.get('tool_calls', [])
+            
+            if not tool_calls:
+                return {'success': True, 'response': msg.get('content', ''), 'tool_outputs': '\n'.join(all_tool_outputs)}
+            
+            messages.append(msg)
+            for tc in tool_calls:
+                fn = tc.get('function', {})
+                fn_name = fn.get('name', '')
+                try:
+                    fn_args = json.loads(fn.get('arguments', '{}')) if isinstance(fn.get('arguments'), str) else fn.get('arguments', {})
+                except:
+                    fn_args = {}
+                tool_result = tools.execute_tool(fn_name, fn_args)
+                raw_text = json.dumps(tool_result, ensure_ascii=False)
+                all_tool_outputs.append(raw_text)
+                messages.append({
+                    'role': 'tool',
+                    'tool_call_id': tc.get('id', ''),
+                    'content': raw_text
+                })
+        
+        last_content = ''
+        if messages:
+            last = messages[-1]
+            if isinstance(last, dict):
+                last_content = last.get('content', '')
+        return {'success': True, 'response': last_content, 'tool_outputs': '\n'.join(all_tool_outputs)}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'message': str(e)}
+
+
+def _parse_links_from_text(text, devices):
+    """从 LLM 返回文本和 tool 原始输出中提取链路信息"""
+    import re
+    
+    def find_id(name):
+        if not name:
+            return None
+        for d in devices:
+            if d.get('remark') == name or d.get('name') == name:
+                return d.get('id')
+        for d in devices:
+            if name in (d.get('remark','') or '') or name in (d.get('name','') or ''):
+                return d.get('id')
+        return None
+    
+    raw_links = []
+    
+    # 策略1：从原始 LLDP 输出中直接提取（最可靠）
+    # 通用端口名正则：匹配所有厂商的常见端口命名
+    # GigabitEthernet, Ten-GigabitEthernet, FortyGigE, HundredGigE, XGE, 10GE, Ethernet, Eth, GE, Port-channel, Vlanif 等
+    PORT_RE = r'(?:GigabitEthernet|Ten-GigabitEthernet|FortyGigE|HundredGigE|XGE|10GE|40GE|100GE|Ethernet|Eth|GE|Port-channel|Vlanif|LoopBack|NULL|Vlan|Bridge-Aggregation|Route-Aggregation)\d+(?:/\d+)*(?:\.\d+)?'
+    
+    for d in devices:
+        dev_name = d.get('remark') or d.get('name')
+        dev_id = d.get('id')
+        # 匹配本地端口（H3C: "port N[端口名]"，思科: "Port N (端口名)"，或 "Local Interface: 端口名"）
+        local_ports = re.findall(r'(?:port\s+\d+\s*\[?(' + PORT_RE + r')\])|(?:Port\s+\d+\s*\((' + PORT_RE + r')\))|(?:Local\s+Interface\s*:\s*(' + PORT_RE + r'))', text, re.IGNORECASE)
+        # 匹配对端端口（多种格式：H3C "PortID/subtype : GE1/0/1/Interface name"，思科 "Port ID: GE1/0/1"）
+        remote_ports = re.findall(r'(?:PortID/subtype\s*:\s*|Port\s*ID:\s*)(' + PORT_RE + r')', text, re.IGNORECASE)
+
+        
+        # 配对本地端口和远程端口
+        all_local = [p[0] or p[1] or p[2] for p in local_ports if p[0] or p[1] or p[2]]
+        for i, lp in enumerate(all_local):
+            rp = remote_ports[i] if i < len(remote_ports) else 'unknown'
+            # 找对端设备（通过端口上下文推断，或默认连接到其他设备）
+            for other_d in devices:
+                if other_d.get('id') != dev_id:
+                    raw_links.append({
+                        'from_name': dev_name,
+                        'from_port': lp,
+                        'to_name': other_d.get('remark') or other_d.get('name'),
+                        'to_port': rp
+                    })
+    
+    # 策略2：如果策略1找到结果，直接用
+    if raw_links:
+        # 按端口对去重
+        port_pairs = {}
+        for l in raw_links:
+            fid, tid = find_id(l['from_name']), find_id(l['to_name'])
+            if not fid or not tid:
+                continue
+            # 排序确保方向一致
+            if fid > tid:
+                fid, tid = tid, fid
+                l['from_name'], l['to_name'] = l['to_name'], l['from_name']
+                l['from_port'], l['to_port'] = l['to_port'], l['from_port']
+            key = (fid, tid, l['from_port'], l['to_port'])
+            if key not in port_pairs:
+                port_pairs[key] = {
+                    'from': fid, 'to': tid,
+                    'from_name': l['from_name'], 'to_name': l['to_name'],
+                    'from_port': l['from_port'], 'to_port': l['to_port'],
+                    'link_type': 'unknown', 'protocol': 'lldp'
+                }
+        return list(port_pairs.values())
+    
+    # 策略3：从 LLM JSON 回复中提取（备选）
+    json_text = re.sub(r'```json\s*', '', text)
+    json_text = re.sub(r'```', '', json_text)
+    json_text = json_text.replace('`', '')
+    if not json_text.strip().startswith('['):
+        start = json_text.find('[')
+        end = json_text.rfind(']')
+        if start >= 0 and end >= 0:
+            json_text = json_text[start:end+1]
+    
+    json_patterns = re.findall(r'\[[\s\S]*?\{[\s\S]*?\}[\s\S]*?\]', json_text)
+    for jp in json_patterns:
+        try:
+            arr = json.loads(jp)
+            if isinstance(arr, list):
+                for item in arr:
+                    if isinstance(item, dict):
+                        from_name = (item.get('from_name') or item.get('source_device') or '')
+                        to_name = (item.get('to_name') or item.get('destination_device') or '')
+                        from_port = (item.get('from_port') or item.get('source_port') or 'unknown')
+                        to_port = (item.get('to_port') or item.get('destination_port') or 'unknown')
+                        if from_name and to_name:
+                            raw_links.append({'from_name': from_name, 'to_name': to_name, 'from_port': from_port, 'to_port': to_port})
+        except:
+            pass
+    
+    # 去重
+    port_pairs = {}
+    for l in raw_links:
+        fid, tid = find_id(l['from_name']), find_id(l['to_name'])
+        if not fid or not tid:
+            continue
+        if fid > tid:
+            fid, tid = tid, fid
+            l['from_name'], l['to_name'] = l['to_name'], l['from_name']
+            l['from_port'], l['to_port'] = l['to_port'], l['from_port']
+        key = (fid, tid, l['from_port'], l['to_port'])
+        if key not in port_pairs:
+            port_pairs[key] = {
+                'from': fid, 'to': tid,
+                'from_name': l['from_name'], 'to_name': l['to_name'],
+                'from_port': l['from_port'], 'to_port': l['to_port'],
+                'link_type': 'unknown', 'protocol': 'lldp'
+            }
+    
+    return list(port_pairs.values())
 
 @app.route('/api/topology/apply', methods=['POST'])
 def topology_apply():
@@ -607,6 +1050,7 @@ def identify_device(device):
                 'username': username or '',
                 'password': password or '',
                 'timeout': 3,
+                'conn_timeout': 5,
             }
         else:
             # SSH 场景仍要求凭证
@@ -619,6 +1063,7 @@ def identify_device(device):
                 'username': username,
                 'password': password,
                 'timeout': 3,
+                'conn_timeout': 5,
             }
 
         with ConnectHandler(**conn_params) as conn:
@@ -751,7 +1196,22 @@ def chat():
         
         # 如果有选中的设备，高亮显示
         selected_device_info = ""
-        if selected_device:
+        selected_devices_list = context.get('selected_devices', [])
+        
+        if selected_devices_list and len(selected_devices_list) > 1:
+            # 多设备模式
+            dev_details = []
+            for dev_name in selected_devices_list:
+                for d in devices:
+                    if d.get('name') == dev_name or d.get('remark') == dev_name:
+                        dev_details.append(f"  - {d.get('remark','无')} ({d['name']}, IP: {d.get('ip')}, {d.get('vendor','unknown')}, {d.get('conn_type','ssh')})")
+                        break
+            selected_device_info = f"""
+【当前选中设备（多设备模式）】:
+{chr(10).join(dev_details)}
+
+用户的操作需要在这些设备上逐一执行。如果用户说"查看VLAN"，就在每台设备上都执行。"""
+        elif selected_device:
             for d in devices:
                 if d.get('name') == selected_device or d.get('remark') == selected_device:
                     selected_device_info = f"""
@@ -783,10 +1243,10 @@ def chat():
 {topo_summary}
 
 【重要规则】：
-1. 如果用户选中了设备（上面【当前选中设备】），所有操作都针对这个设备
-2. 如果用户说"查看 VLAN"、"查看路由"等，直接操作选中的设备，不要问是哪个设备
-3. 如果用户明确指定设备名/备注，操作指定的设备
-4. 如果用户说"所有设备"、"批量"，才操作所有设备
+1. 如果选中了多台设备，用户的操作需要在每台设备上执行
+2. 如果只选中了一台设备，所有操作都针对这台设备
+3. 如果用户说"查看 VLAN"、"查看路由"等，直接操作选中的设备，不要问是哪个设备
+4. 如果用户明确指定设备名/备注，操作指定的设备
 5. 你必须调用工具执行操作，不要只是回复文字！
 6. 不要问用户"是哪个设备"，直接执行！"""
 
@@ -1283,6 +1743,111 @@ def delete_device():
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/device/collect', methods=['POST'])
+def device_collect():
+    """采集设备运行状态：VLAN 数、UP 接口数、trunk 迹象等，回写到 devices.json"""
+    try:
+        data = request.json or {}
+        device_name = data.get('device', '').strip()
+        devices = load_devices()
+        target = None
+        for d in devices:
+            if d.get('name') == device_name or d.get('remark') == device_name or d.get('ip') == device_name:
+                target = d
+                break
+        if not target:
+            return jsonify({'success': False, 'message': f'设备 {device_name} 不存在'})
+
+        # 通过工具执行采集命令
+        collect_cmds = [
+            'display vlan brief',
+            'display interface brief',
+            'display ip interface brief',
+            'show vlan brief',
+            'show ip interface brief',
+            'show interfaces status',
+        ]
+        conn_type = target.get('conn_type', 'ssh')
+        tool_name = 'telnet_connect' if conn_type == 'telnet' else 'ssh_connect'
+        res = tools.execute_tool(tool_name, {'device': target.get('name'), 'commands': collect_cmds})
+
+        if not res.get('success'):
+            return jsonify({'success': False, 'message': '采集失败：' + str(res.get('error', ''))})
+
+        # 解析输出提取状态事实
+        all_output = ''
+        for r in res.get('results', []):
+            all_output += '\n' + (r.get('output') or '')
+
+        import re
+        facts = {
+            'vlan_count': 0,
+            'up_interfaces': 0,
+            'total_interfaces': 0,
+            'trunk_ports': [],
+            'vlan_list': [],
+            'last_collected': __import__('datetime').datetime.now().isoformat(),
+        }
+
+        # 提取 VLAN 数量
+        vlan_ids = set()
+        for m in re.finditer(r'(?:VLAN|vlan)\s+(?:ID\s+)?(\d+)', all_output):
+            vid = int(m.group(1))
+            if 1 <= vid <= 4094:
+                vlan_ids.add(vid)
+        facts['vlan_count'] = len(vlan_ids)
+        facts['vlan_list'] = sorted(list(vlan_ids))[:20]
+
+        # 提取 UP 接口数
+        up_count = 0
+        total_count = 0
+        for line in all_output.splitlines():
+            line = line.strip()
+            # 匹配接口行（含 GE/Gigabit/Eth/Port 等）
+            if re.search(r'^(GE|GigabitEthernet|Ethernet|Eth|Ten-GigabitEthernet|XGE|Po|Vlanif|Vlan|Loop|NULL)', line, re.IGNORECASE):
+                total_count += 1
+                if re.search(r'\bup\b', line, re.IGNORECASE) and not re.search(r'\bdown\b', line, re.IGNORECASE):
+                    up_count += 1
+        facts['up_interfaces'] = up_count
+        facts['total_interfaces'] = total_count
+
+        # 提取 trunk 端口
+        for m in re.finditer(r'(?:GE|GigabitEthernet|Ethernet|Eth|Ten-GigabitEthernet|XGE)\s*[\d/]+', all_output, re.IGNORECASE):
+            port = m.group(0).strip()
+        for m in re.finditer(r'trunk', all_output, re.IGNORECASE):
+            # 找同一行或前一行中的端口名
+            pass
+        # 简单检测：输出中包含 trunk 关键字时标记
+        if 'trunk' in all_output.lower():
+            trunk_matches = re.findall(r'((?:GE|GigabitEthernet|Eth|Ethernet|XGE|Ten-GigabitEthernet)[\d/]+)\s+\S*\s+\S*\s+trunk', all_output, re.IGNORECASE)
+            facts['trunk_ports'] = list(set(trunk_matches))[:10]
+
+        # 回写设备状态
+        target['facts'] = facts
+        save_devices(devices)
+
+        return jsonify({'success': True, 'facts': facts, 'device': target.get('name')})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/device/facts', methods=['GET'])
+def device_facts():
+    """获取所有设备的状态事实"""
+    devices = load_devices()
+    result = []
+    for d in devices:
+        result.append({
+            'id': d.get('id'),
+            'name': d.get('name'),
+            'remark': d.get('remark', ''),
+            'facts': d.get('facts', {}),
+        })
+    return jsonify({'success': True, 'devices': result})
 
 
 if __name__ == '__main__':

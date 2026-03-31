@@ -1,4 +1,4 @@
-﻿"""
+"""
 NetOps AI Web界面后端 - 简化版
 """
 import sys
@@ -569,9 +569,6 @@ def delete_device():
 
 # AI对话API
 import json
-
-# 全局设备执行器
-device_executor = DeviceExecutor()
 
 # 配置模板 API
 @app.route('/api/template/list', methods=['GET'])
