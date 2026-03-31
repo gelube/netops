@@ -952,7 +952,9 @@
       buildTopologyFromDevices();
       await syncTopologyState();
       renderAll();
-      addMsg('system', editingDeviceId ? '设备已更新' : '设备已保存');
+      // 新增设备后自动采集
+      collectDeviceFacts(payload.remark || payload.name);
+      addMsg('system', editingDeviceId ? '✅ 设备已更新， 自动采集中设备信息' : '⏳ 自动采集中...');
       editingDeviceId = null;
       editingBasicOnly = false;
     }
