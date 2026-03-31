@@ -1047,6 +1047,11 @@
       const input = document.getElementById('chat-input');
       const msg = input.value.trim();
       if (!msg) return;
+      // 配置操作二次确认
+      const cfgWords = ['配置','创建','删除','修改','关闭','shutdown','undo','撤销'];
+      if (cfgWords.some(k => msg.includes(k)) && !msg.includes('确认') && !msg.includes('查询') && !msg.includes('查看') && !msg.includes('display') && !msg.includes('show')) {
+        if (!confirm('⚠️ 检测到配置操作:\n\n' + msg + '\n\n确认执行？')) return;
+      }
       addMsg('user', msg);
       input.value = '';
       _chatBusy = true;
