@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NetOps AI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #111827; color: #e5e7eb; }
+
+    .header { height: 60px; background: #0f172a; border-bottom: 1px solid #1f2937; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
+    .title { font-weight: 700; font-size: 20px; }
+    .title span { color: #22d3ee; }
+    .status { color: #94a3b8; font-size: 13px; }
+
+    .toolbar { height: 48px; background: #111827; border-bottom: 1px solid #1f2937; display: flex; align-items: center; gap: 8px; padding: 0 16px; }
+    .btn { padding: 8px 12px; border: 1px solid #334155; background: #1e293b; color: #e5e7eb; border-radius: 6px; cursor: pointer; }
+    .btn:hover { border-color: #22d3ee; }
+
+    .layout { height: calc(100vh - 108px); display: grid; grid-template-columns: 180px 1fr 180px; }
+
+    .left { border-right: 1px solid #1f2937; background: #0b1220; padding: 8px; overflow: auto; }
+    .left h3 { margin-bottom: 10px; color: #67e8f9; font-size: 14px; }
+    .device-item { padding: 10px; border: 1px solid #1f2937; border-radius: 8px; background: #0f172a; margin-bottom: 8px; cursor: pointer; }
+    .device-item:hover, .device-item.active { border-color: #22d3ee; }
+    .device-name { font-weight: 700; font-size: 14px; }
+    .device-ip { color: #94a3b8; font-size: 12px; margin-top: 4px; }
+
+    .center { display: grid; grid-template-rows: 8fr 2fr; min-width: 0; }
+    .topology-panel { border-bottom: 1px solid #1f2937; padding: 6px; display: grid; grid-template-rows: auto 1fr; gap: 4px; }
+    .topology-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .topology-infinite { position: relative; border: 1px solid #164e63; border-radius: 8px; background: radial-gradient(circle at 20% 20%, #0b1220 0%, #05080f 100%); min-height: 520px; overflow: hidden; }
+    .topology-world { position: absolute; inset: 0; transform-origin: 0 0; }
+    #topology-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    #topology-node-layer { position: absolute; inset: 0; }
+    .lane { position: absolute; left: 12px; right: 12px; height: 110px; border: 1px dashed rgba(56, 189, 248, 0.25); border-radius: 8px; background: rgba(15, 23, 42, 0.22); }
+    .lane-label { position: absolute; left: 8px; top: 6px; font-size: 11px; color: #67e8f9; letter-spacing: 1px; text-transform: uppercase; }
+    .topo-node { position: absolute; width: 150px; min-height: 64px; border: 1px solid #22d3ee; border-radius: 10px; background: rgba(6, 15, 27, 0.9); box-shadow: 0 0 12px rgba(34, 211, 238, 0.35); padding: 8px; cursor: pointer; user-select: none; }
+    .topo-node:hover { box-shadow: 0 0 18px rgba(56, 189, 248, 0.6); }
+    .topo-node.router { border-color: #60a5fa; box-shadow: 0 0 14px rgba(96, 165, 250, 0.45); border-radius: 999px; }
+    .topo-node.firewall { border-color: #fb923c; box-shadow: 0 0 14px rgba(251, 146, 60, 0.4); border-radius: 4px; }
+    .topo-node.switch { border-color: #34d399; box-shadow: 0 0 14px rgba(52, 211, 153, 0.4); border-radius: 10px; }
+    .topo-head { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+    .node-dot { width: 10px; height: 10px; border-radius: 50%; background:#22d3ee; box-shadow:0 0 8px #22d3ee; }
+    .node-icon { width: 16px; height: 16px; flex: 0 0 16px; }
+    .node-remark { font-size: 12px; font-weight: 700; color: #d1fafb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .node-ip { font-size: 11px; color: #7dd3fc; }
+    .node-chips { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 4px; }
+    .chip { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: rgba(34,211,238,0.15); color: #67e8f9; white-space: nowrap; }
+    .chip.warn { background: rgba(251,146,60,0.2); color: #fb923c; }
+    .chip.ok { background: rgba(52,211,153,0.2); color: #34d399; }
+    .topo-edge { stroke: #22d3ee; stroke-width: 1.8; opacity: 0.9; fill: none; }
+    .topo-edge.trunk { stroke: #f59e0b; }
+    .topo-edge.access { stroke: #22d3ee; }
+    .topo-edge.port-channel-lacp, .topo-edge.port-channel-static { stroke: #a78bfa; }
+    .topo-edge.l3-p2p { stroke: #34d399; stroke-dasharray: 5 4; }
+    .pc-ring { fill: none; stroke: #a78bfa; stroke-width: 1.6; opacity: 0.95; }
+    .edge-label { fill: #cbd5e1; font-size: 11px; }
+    .port-label { fill: #7dd3fc; font-size: 10px; }
+    .port-label.right { text-anchor: end; }
+
+    .links { border: 1px solid #1f2937; border-radius: 8px; background: #0f172a; padding: 8px; max-height: 120px; overflow: auto; }
+    .link-row { font-size: 12px; color: #cbd5e1; padding: 4px 0; border-bottom: 1px solid #1f2937; }    .link-row:last-child { border-bottom: none; }
+
+    .chat-panel { padding: 10px; display: grid; grid-template-rows: 1fr auto; min-height: 0; }
+    .messages { border: 1px solid #1f2937; border-radius: 8px; background: #0b1220; padding: 10px; overflow: auto; }
+    .msg { margin-bottom: 8px; padding: 8px; border-radius: 6px; font-size: 13px; }
+    .msg-user { background: #1d4ed8; color: #fff; text-align: right; }
+    .msg-ai { background: #1f2937; }
+    .msg-system { background: #334155; color: #cbd5e1; }
+    .chat-input { display: flex; gap: 8px; margin-top: 8px; }
+    .chat-input input { flex: 1; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; border-radius: 6px; padding: 8px; }
+
+    .right { border-left: 1px solid #1f2937; background: #0b1220; padding: 12px; overflow: auto; }
+    .right h3 { color: #67e8f9; font-size: 14px; margin-bottom: 10px; }
+    .detail-row { padding: 8px 0; border-bottom: 1px solid #1f2937; }
+    .detail-key { color: #94a3b8; font-size: 12px; }
+    .detail-val { margin-top: 4px; }
+
+    .right .form-group select, .right .form-group input { width: 100%; border: 1px solid #334155; background: #0b1220; color: #e5e7eb; border-radius: 6px; padding: 6px; font-size: 12px; }
+
+    .config-module { border: 1px solid #1f2937; border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+    .config-module-header { padding: 8px 10px; background: #0f172a; color: #67e8f9; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .config-module-header:hover { background: #1e293b; }
+    .config-module-body { padding: 10px; display: none; }
+    .config-module.open .config-module-body { display: block; }
+    .config-exec-btn { width: 100%; padding: 8px; background: #1d4ed8; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; margin-top: 6px; }
+    .config-exec-btn:hover { background: #2563eb; }
+    .config-exec-btn:disabled { background: #334155; cursor: not-allowed; }
+    .config-result { margin-top: 6px; padding: 6px; border-radius: 6px; font-size: 12px; max-height: 120px; overflow: auto; }
+    .config-result.success { background: #064e3b; color: #6ee7b7; }
+    .config-result.error { background: #450a0a; color: #fca5a5; }
+
+    .cfg-tab { padding: 6px 12px; border: none; background: transparent; color: #94a3b8; font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+    .cfg-tab.active { color: #22d3ee; border-bottom-color: #22d3ee; }
+    .cfg-tab:hover { color: #67e8f9; }
+    .cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .cfg-grid .btn { font-size: 12px; padding: 6px 8px; text-align: left; }
+    .cfg-grid .btn:hover { border-color: #22d3ee; background: #1e293b; }
+
+    .modal { display: none; position: fixed; inset: 0; background: rgba(2, 6, 23, 0.75); align-items: center; justify-content: center; }
+    .modal.show { display: flex; }
+    .modal-box { width: 460px; max-width: 92vw; background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 14px; }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .close { background: transparent; color: #e5e7eb; border: none; font-size: 22px; cursor: pointer; }
+    .form-group { margin-bottom: 10px; }
+    .form-group label { display: block; margin-bottom: 4px; color: #94a3b8; font-size: 12px; }
+    .form-group input, .form-group select { width: 100%; border: 1px solid #334155; background: #0b1220; color: #e5e7eb; border-radius: 6px; padding: 8px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title">NETOPS <span>AI</span></div>
+    <div class="status"><span id="llm-status">LLM: 未配置</span> | <span id="device-count">设备: 0</span></div>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn" id="btn-add">+ 添加设备</button>
+    <button class="btn" id="btn-discover">识别拓扑(LLDP/CDP)</button>
+    <button class="btn" id="btn-apply">确认并应用</button>
+    <button class="btn" id="btn-refresh-facts">刷新状态</button>
+    <button class="btn" id="btn-llm">LLM 设置</button>
+  </div>
+
+  <div class="layout">
+    <aside class="left">
+      <h3>设备列表</h3>
+      <div id="device-list"></div>
+    </aside>
+
+    <main class="center">
+      <section class="topology-panel">
+        <div class="topology-actions">
+          <label style="font-size:12px;color:#94a3b8;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="topo-autorefresh"> 实时刷新</label>
+          <select id="topo-refresh-interval" style="font-size:11px;padding:2px 4px;background:#0f172a;color:#e5e7eb;border:1px solid #334155;border-radius:4px;">
+            <option value="5">5秒</option><option value="10" selected>10秒</option><option value="30">30秒</option><option value="60">60秒</option>
+          </select>
+          <button class="btn" id="btn-refresh-now" style="font-size:11px;padding:4px 8px;">立即刷新</button>
+        </div>
+        <div class="topology-infinite" id="topology-infinite">
+          <div class="topology-world" id="topology-world">
+            <svg id="topology-svg"></svg>
+            <div id="topology-node-layer"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="chat-panel">
+        <div class="messages" id="messages">
+          <div class="msg msg-system">拓扑在上，对话在下。点击拓扑节点可直接编辑设备。</div>
+        </div>
+        <div class="chat-input">
+          <input id="chat-input" placeholder="输入命令或问题...">
+          <button class="btn" id="btn-send">发送</button>
+        </div>
+      </section>
+    </main>
+
+    <aside class="right">
+      <h3>设备详情</h3>
+      <div id="detail-content"><div class="detail-row"><div class="detail-key">提示</div><div class="detail-val">点击左侧设备或拓扑节点查看详情</div></div></div>
+      <div style="margin-top: 10px; display: grid; gap: 8px;">
+        <button class="btn" id="btn-test">测试连接</button>
+        <button class="btn" id="btn-conn-edit">编辑</button>
+        <button class="btn" id="btn-delete">删除设备</button>
+      </div>
+    </aside>
+  </div>
+
+  <div class="modal" id="modal-device">
+    <div class="modal-box">
+      <div class="modal-head"><strong id="modal-device-title">添加设备</strong><button class="close" onclick="closeModal('modal-device')">×</button></div>
+      <div class="form-group"><label>连接方式</label><select id="add-type" onchange="toggleFields()"><option value="ssh">SSH</option><option value="telnet">Telnet</option><option value="serial">串口</option></select></div>
+      <div class="form-group"><label>设备类型</label><select id="add-device-type"><option value="layer2_switch">二层交换机</option><option value="layer3_switch">三层交换机</option><option value="router">路由器</option><option value="firewall">防火墙</option><option value="unknown" selected>自动识别</option></select></div>
+      <div id="net-fields">
+        <div class="form-group"><label>IP</label><input id="add-ip" placeholder="192.168.1.1"></div>
+        <div class="form-group"><label>端口</label><input id="add-port" value="22"></div>
+      </div>
+      <div id="serial-fields" style="display:none;">
+        <div class="form-group"><label>串口</label><input id="add-serial" placeholder="COM3"></div>
+        <div class="form-group"><label>波特率</label><select id="add-baud"><option value="9600">9600</option><option value="115200" selected>115200</option></select></div>
+      </div>
+      <div class="form-group"><label>备注</label><input id="add-remark" placeholder="例如：上海核心"></div>
+      <div class="form-group"><label>用户名</label><input id="add-user" placeholder="admin"></div>
+      <div class="form-group"><label>密码</label><input id="add-pass" type="password"></div>
+      <div class="modal-actions"><button class="btn" onclick="closeModal('modal-device')">取消</button><button class="btn" id="btn-save-device">保存</button></div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal-conn">
+    <div class="modal-box">
+      <div class="modal-head"><strong>连接方式编辑</strong><button class="close" onclick="closeModal('modal-conn')">×</button></div>
+      <div class="form-group"><label>连接方式</label><select id="conn-type" onchange="toggleConnFields()"><option value="ssh">SSH</option><option value="telnet">Telnet</option><option value="serial">串口</option></select></div>
+      <div id="conn-net-fields">
+        <div class="form-group"><label>IP</label><input id="conn-ip" placeholder="192.168.1.1"></div>
+        <div class="form-group"><label>端口</label><input id="conn-port" value="22"></div>
+      </div>
+      <div id="conn-serial-fields" style="display:none;">
+        <div class="form-group"><label>串口</label><input id="conn-serial" placeholder="COM3"></div>
+        <div class="form-group"><label>波特率</label><select id="conn-baud"><option value="9600">9600</option><option value="115200" selected>115200</option></select></div>
+      </div>
+      <div class="form-group"><label>用户名</label><input id="conn-user" placeholder="admin"></div>
+      <div class="form-group"><label>密码</label><input id="conn-pass" type="password"></div>
+      <div class="modal-actions"><button class="btn" onclick="closeModal('modal-conn')">取消</button><button class="btn" id="btn-save-conn">保存连接方式</button></div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal-llm">
+    <div class="modal-box">
+      <div class="modal-head"><strong>LLM 配置</strong><button class="close" onclick="closeModal('modal-llm')">×</button></div>
+      <div class="form-group"><label>Endpoint</label><input id="llm-endpoint" placeholder="http://127.0.0.1:1234/v1"></div>
+      <div class="form-group"><label>API Key（可选）</label><input id="llm-key"></div>
+      <div class="form-group"><label>模型</label><select id="llm-model"><option value="">-- 获取 --</option></select></div>
+      <div class="modal-actions"><button class="btn" id="btn-get-models">获取模型</button><button class="btn" id="btn-save-llm">保存</button></div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal-config">
+    <div class="modal-box" style="width:680px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;">
+      <div class="modal-head">
+        <strong id="config-modal-title">配置中心</strong>
+        <button class="close" onclick="closeModal('modal-config')">×</button>
+      </div>
+      <div id="config-tabs" style="display:flex;gap:0;border-bottom:1px solid #1f2937;margin-bottom:10px;flex-shrink:0;overflow-x:auto;"></div>
+      <div id="config-panel" style="flex:1;overflow-y:auto;padding-right:4px;"></div>
+    </div>
+  </div>
+
+  <script>
+    let devices = [];
+    let selectedId = null;
+    let editingDeviceId = null;
+    let editingBasicOnly = false;
+    let topologyState = { nodes: [], links: [], version: 1 };
+    let view = { x: 0, y: 0, scale: 1 };
+    let dragNodeId = null;
+    let dragStart = null;
+    let panning = false;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      bindEvents();
+      await loadDevices();
+      await loadTopologyState();
+      await loadTopologyTemplates();
+      await loadLLM();
+      buildTopologyFromDevices();
+      renderAll();
+    });
+
+    function bindEvents() {
+      document.getElementById('btn-add').onclick = openAddDevice;
+      document.getElementById('btn-save-device').onclick = saveDevice;
+      document.getElementById('btn-delete').onclick = deleteDevice;
+      document.getElementById('btn-test').onclick = testConnect;
+      document.getElementById('btn-conn-edit').onclick = openConnEditor;
+      document.getElementById('btn-save-conn').onclick = saveConnConfig;
+      document.getElementById('btn-send').onclick = sendChat;
+      document.getElementById('chat-input').onkeydown = e => { if (e.key === 'Enter') sendChat(); };
+
+      document.getElementById('btn-llm').onclick = () => openModal('modal-llm');
+      document.getElementById('btn-get-models').onclick = getModels;
+      document.getElementById('btn-save-llm').onclick = saveLLM;
+
+      document.getElementById('btn-discover').onclick = discoverTopology;
+      document.getElementById('btn-apply').onclick = applyTopology;
+      document.getElementById('btn-refresh-facts').onclick = refreshAllFacts;
+      initTopologyInteractions();
+    }
+
+    function openModal(id) { document.getElementById(id).classList.add('show'); }
+    function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+    function addMsg(type, text) {
+      const box = document.getElementById('messages');
+      const cls = type === 'user' ? 'msg-user' : (type === 'system' ? 'msg-system' : 'msg-ai');
+      box.innerHTML += `<div class="msg ${cls}">${text}</div>`;
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function toggleFields() {
+      const t = document.getElementById('add-type').value;
+      document.getElementById('net-fields').style.display = t === 'serial' ? 'none' : 'block';
+      document.getElementById('serial-fields').style.display = t === 'serial' ? 'block' : 'none';
+      if (t === 'ssh') document.getElementById('add-port').value = '22';
+      if (t === 'telnet') document.getElementById('add-port').value = '23';
+    }
+
+    function toggleConnFields() {
+      const t = document.getElementById('conn-type').value;
+      document.getElementById('conn-net-fields').style.display = t === 'serial' ? 'none' : 'block';
+      document.getElementById('conn-serial-fields').style.display = t === 'serial' ? 'block' : 'none';
+      if (t === 'ssh') document.getElementById('conn-port').value = '22';
+      if (t === 'telnet') document.getElementById('conn-port').value = '23';
+    }
+
+    function openAddDevice() {
+      editingDeviceId = null;
+      editingBasicOnly = false;
+      document.getElementById('modal-device-title').textContent = '添加设备';
+      document.getElementById('add-type').value = 'ssh';
+      document.getElementById('add-device-type').value = 'unknown';
+      document.getElementById('add-ip').value = '';
+      document.getElementById('add-port').value = '22';
+      document.getElementById('add-serial').value = '';
+      document.getElementById('add-baud').value = '115200';
+      document.getElementById('add-remark').value = '';
+      document.getElementById('add-user').value = '';
+      document.getElementById('add-pass').value = '';
+      document.getElementById('add-type').closest('.form-group').style.display = 'block';
+      document.getElementById('add-user').closest('.form-group').style.display = 'block';
+      document.getElementById('add-pass').closest('.form-group').style.display = 'block';
+      toggleFields();
+      openModal('modal-device');
+    }
+
+    function openDeviceEditor(id) {
+      const d = devices.find(x => x.id === id);
+      if (!d) return;
+      editingDeviceId = id;
+      editingBasicOnly = true;
+      document.getElementById('modal-device-title').textContent = '编辑设备基础信息（LLM）';
+      document.getElementById('add-type').value = d.conn_type || 'ssh';
+      toggleFields();
+      if (d.conn_type === 'serial') {
+        document.getElementById('add-serial').value = d.serial_port || '';
+        document.getElementById('add-baud').value = String(d.baud || 115200);
+      } else {
+        document.getElementById('add-ip').value = d.ip || '';
+        document.getElementById('add-port').value = String(d.port || 22);
+      }
+      document.getElementById('add-device-type').value = d.device_type || 'unknown';
+      document.getElementById('add-remark').value = d.remark || '';
+      document.getElementById('add-user').value = d.username || '';
+      document.getElementById('add-pass').value = d.password || '';
+
+      // 拓扑编辑仅改基础信息，不改连接方式
+      document.getElementById('add-type').closest('.form-group').style.display = 'none';
+      document.getElementById('net-fields').style.display = 'none';
+      document.getElementById('serial-fields').style.display = 'none';
+      document.getElementById('add-user').closest('.form-group').style.display = 'none';
+      document.getElementById('add-pass').closest('.form-group').style.display = 'none';
+
+      openModal('modal-device');
+    }
+
+    function openConnEditor() {
+      const d = devices.find(x => x.id === selectedId);
+      if (!d) { alert('请先选中设备'); return; }
+      document.getElementById('conn-type').value = d.conn_type || 'ssh';
+      document.getElementById('conn-ip').value = d.ip || '';
+      document.getElementById('conn-port').value = String(d.port || (d.conn_type === 'telnet' ? 23 : 22));
+      document.getElementById('conn-serial').value = d.serial_port || '';
+      document.getElementById('conn-baud').value = String(d.baud || 115200);
+      document.getElementById('conn-user').value = d.username || '';
+      document.getElementById('conn-pass').value = d.password || '';
+      toggleConnFields();
+      openModal('modal-conn');
+    }
+
+    async function saveConnConfig() {
+      const d = devices.find(x => x.id === selectedId);
+      if (!d) { alert('请先选中设备'); return; }
+      const connType = document.getElementById('conn-type').value;
+      const payload = {
+        device_id: d.id,
+        conn_type: connType,
+        device_type: d.device_type || 'unknown',
+        remark: d.remark || '',
+        username: document.getElementById('conn-user').value.trim(),
+        password: document.getElementById('conn-pass').value,
+      };
+      if (connType === 'serial') {
+        payload.serial_port = document.getElementById('conn-serial').value.trim();
+        payload.baud = parseInt(document.getElementById('conn-baud').value || '115200');
+        if (!payload.serial_port) { alert('请输入串口'); return; }
+      } else {
+        payload.ip = document.getElementById('conn-ip').value.trim();
+        payload.port = parseInt(document.getElementById('conn-port').value || (connType === 'telnet' ? '23' : '22'));
+        if (!payload.ip) { alert('请输入 IP'); return; }
+      }
+
+      const r = await fetch('/api/device/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const res = await r.json();
+      if (!res.success) { alert(res.message || '保存失败'); return; }
+      closeModal('modal-conn');
+      await loadDevices();
+      buildTopologyFromDevices();
+      await syncTopologyState();
+      renderAll();
+      addMsg('system', '连接方式已更新');
+    }
+
+    async function loadDevices() {
+      const r = await fetch('/api/devices');
+      const d = await r.json();
+      devices = d.devices || [];
+    }
+
+    async function loadTopologyState() {
+      try {
+        const r = await fetch('/api/topology/state');
+        const d = await r.json();
+        topologyState = d.state || { nodes: [], links: [], version: 1 };
+      } catch {
+        topologyState = { nodes: [], links: [], version: 1 };
+      }
+    }
+
+    async function syncTopologyState() {
+      await fetch('/api/topology/state', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(topologyState)
+      });
+    }
+
+    function buildTopologyFromDevices() {
+      topologyState.nodes = devices.map(d => ({
+        id: d.id,
+        name: d.name,
+        remark: d.remark || '',
+        ip: d.ip || d.serial_port || 'N/A',
+        deviceType: d.device_type || 'unknown'
+      }));
+    }
+
+    function iconSvg(dtype) {
+      const t = (dtype || '').toLowerCase();
+      if (t.includes('router')) {
+        return `<svg class="node-icon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#60a5fa" stroke-width="2"/><path d="M7 12h10M12 7v10" stroke="#60a5fa" stroke-width="2"/></svg>`;
+      }
+      if (t.includes('firewall')) {
+        return `<svg class="node-icon" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="2" stroke="#fb923c" stroke-width="2"/><path d="M4 10h16M4 14h16M10 4v16M14 4v16" stroke="#fb923c" stroke-width="1.5"/></svg>`;
+      }
+      return `<svg class="node-icon" viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#34d399" stroke-width="2"/><circle cx="8" cy="12" r="1.5" fill="#34d399"/><circle cx="12" cy="12" r="1.5" fill="#34d399"/><circle cx="16" cy="12" r="1.5" fill="#34d399"/></svg>`;
+    }
+
+    function initTopologyInteractions() {
+      const infinite = document.getElementById('topology-infinite');
+      const nodeLayer = document.getElementById('topology-node-layer');
+
+      infinite.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.08 : 0.08;
+        view.scale = Math.min(2.2, Math.max(0.4, view.scale + delta));
+        renderTopology();
+      }, { passive: false });
+
+      infinite.addEventListener('mousedown', (e) => {
+        const node = e.target.closest('.topo-node');
+        if (node) {
+          dragNodeId = node.dataset.id;
+          dragStart = { x: e.clientX, y: e.clientY };
+          e.preventDefault();
+          return;
+        }
+        panning = true;
+        dragStart = { x: e.clientX, y: e.clientY };
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (dragNodeId) {
+          const n = (topologyState.nodes || []).find(x => x.id === dragNodeId);
+          if (!n || !dragStart) return;
+          n.x += (e.clientX - dragStart.x) / view.scale;
+          n.y += (e.clientY - dragStart.y) / view.scale;
+          dragStart = { x: e.clientX, y: e.clientY };
+          renderTopology();
+          return;
+        }
+        if (panning && dragStart) {
+          view.x += (e.clientX - dragStart.x);
+          view.y += (e.clientY - dragStart.y);
+          dragStart = { x: e.clientX, y: e.clientY };
+          renderTopology();
+        }
+      });
+
+      window.addEventListener('mouseup', async () => {
+        if (dragNodeId || panning) {
+          dragNodeId = null;
+          panning = false;
+          dragStart = null;
+          await syncTopologyState();
+        }
+      });
+    }
+
+    function renderAll() {
+      renderDeviceList();
+      renderTopology();
+      renderDetail(selectedId);
+      document.getElementById('device-count').textContent = '设备: ' + devices.length;
+    }
+
+    function renderDeviceList() {
+      const list = document.getElementById('device-list');
+      if (!devices.length) {
+        list.innerHTML = '<div style="color:#94a3b8;font-size:12px;">暂无设备</div>';
+        return;
+      }
+      list.innerHTML = devices.map(d => `
+        <div class="device-item ${selectedId === d.id ? 'active' : ''}" onclick="selectDevice('${d.id}')">
+          <div class="device-name">${d.remark || d.name}</div>
+          <div class="device-ip">${d.ip || d.serial_port || 'N/A'}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderTopology() {
+      const nodeLayer = document.getElementById('topology-node-layer');
+      const svg = document.getElementById('topology-svg');
+      const world = document.getElementById('topology-world');
+
+      const nodes = topologyState.nodes || [];
+      const links = topologyState.links || [];
+
+      const laneY = { core: 40, aggregation: 170, access: 300 };
+      function laneOf(node) {
+        const t = (node.deviceType || '').toLowerCase();
+        if (t.includes('router') || t.includes('firewall') || t.includes('layer3')) return 'core';
+        if (t.includes('aggregation')) return 'aggregation';
+        return 'access';
+      }
+
+      const laneCount = { core: 0, aggregation: 0, access: 0 };
+      nodes.forEach((n) => {
+        const lane = laneOf(n);
+        if (typeof n.x !== 'number' || typeof n.y !== 'number') {
+          laneCount[lane] += 1;
+          n.x = 90 + (laneCount[lane] - 1) * 180;
+          n.y = laneY[lane];
+        }
+      });
+
+      world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+
+      if (!nodes.length) {
+        nodeLayer.innerHTML = '<div style="color:#94a3b8;position:absolute;left:20px;top:20px;">暂无设备，请先添加设备。</div>';
+        svg.innerHTML = '';
+      } else {
+        nodeLayer.innerHTML = `
+          <div class="lane" style="top:${laneY.core - 16}px;"><div class="lane-label">CORE</div></div>
+          <div class="lane" style="top:${laneY.aggregation - 16}px;"><div class="lane-label">AGGREGATION</div></div>
+          <div class="lane" style="top:${laneY.access - 16}px;"><div class="lane-label">ACCESS</div></div>
+        ` + nodes.map(n => {
+          const t = (n.deviceType || '').toLowerCase();
+          const cls = t.includes('router') ? 'router' : (t.includes('firewall') ? 'firewall' : 'switch');
+          const dev = devices.find(x => x.id === n.id);
+          const facts = dev?.facts || {};
+          let chips = '';
+          if (facts.vlan_count) chips += `<span class="chip ok">VLAN:${facts.vlan_count}</span>`;
+          if (facts.up_interfaces) chips += `<span class="chip ok">UP:${facts.up_interfaces}</span>`;
+          if (facts.trunk_ports?.length) chips += `<span class="chip warn">Trunk:${facts.trunk_ports.length}</span>`;
+          if (facts.last_collected) chips += `<span class="chip">●</span>`;
+          return `
+          <div class="topo-node ${cls}" data-id="${n.id}" style="left:${n.x}px; top:${n.y}px;" onclick="openTopologyDeviceConfig('${n.id}')">
+            <div class="topo-head">${iconSvg(t)}<div class="node-remark">${n.remark || n.name || '未命名设备'}</div></div>
+            <div class="node-ip">${n.ip || 'N/A'}</div>
+            ${chips ? `<div class="node-chips">${chips}</div>` : ''}
+          </div>
+        `;
+        }).join('');
+
+        svg.innerHTML = links.map((l, idx) => {
+          const a = nodes.find(n => n.id === l.from);
+          const b = nodes.find(n => n.id === l.to);
+          if (!a || !b) return '';
+
+          const pairKey = [l.from, l.to].sort().join('::');
+          const siblings = links.filter(x => [x.from, x.to].sort().join('::') === pairKey);
+          const order = siblings.findIndex(x => x.id === l.id || x === l);
+          const offset = (order - (siblings.length - 1) / 2) * 12;
+
+          const x1 = a.x + 150, y1 = a.y + 32 + offset;
+          const x2 = b.x, y2 = b.y + 32 + offset;
+          const mid = (x1 + x2) / 2;
+          const cls = `topo-edge ${l.link_type || 'access'}`;
+          const path = `M ${x1} ${y1} L ${mid} ${y1} L ${mid} ${y2} L ${x2} ${y2}`;
+          const typeLabel = (!l.link_type || l.link_type === 'unknown') ? '' : l.link_type;
+          const shortPort = (p) => {
+            const s = (p || '?').trim();
+            return s
+              .replace(/^GigabitEthernet/i, 'GE')
+              .replace(/^Ten-GigabitEthernet/i, '10GE')
+              .replace(/^FortyGigE/i, '40GE')
+              .replace(/^HundredGigE/i, '100GE')
+              .replace(/^Ethernet/i, 'Eth');
+          };
+          const leftPort = shortPort(l.from_port);
+          const rightPort = shortPort(l.to_port);
+          const cy = (y1 + y2) / 2;
+          return `<path class="${cls}" d="${path}" />
+                  <text class="port-label" x="${x1 + 8}" y="${y1 - 6}">${leftPort}</text>
+                  <text class="port-label right" x="${x2 - 8}" y="${y2 - 6}">${rightPort}</text>`;
+        }).join('');
+      }
+
+      if (!links.length) {
+        // no links yet
+      }
+    }
+
+    function selectDevice(id) {
+      selectedId = id;
+      renderAll();
+    }
+
+    function renderDetail(id) {
+      const box = document.getElementById('detail-content');
+      const d = devices.find(x => x.id === id);
+      if (!d) {
+        box.innerHTML = '<div class="detail-row"><div class="detail-key">提示</div><div class="detail-val">点击设备查看详情</div></div>';
+        return;
+      }
+      box.innerHTML = `
+        <div class="detail-row"><div class="detail-key">备注</div><div class="detail-val">${d.remark || '无'}</div></div>
+        <div class="detail-row"><div class="detail-key">名称</div><div class="detail-val">${d.name || '无'}</div></div>
+        <div class="detail-row"><div class="detail-key">连接</div><div class="detail-val">${d.conn_type === 'serial' ? (d.serial_port || '') : ((d.ip || '') + ':' + (d.port || ''))}</div></div>
+        <div class="detail-row"><div class="detail-key">类型</div><div class="detail-val">${d.device_type || 'unknown'}</div></div>
+        <div class="detail-row"><div class="detail-key">厂商</div><div class="detail-val">${d.vendor || 'unknown'}</div></div>
+      `;
+    }
+
+    async function saveDevice() {
+      const current = devices.find(x => x.id === editingDeviceId);
+      const type = editingBasicOnly && current ? (current.conn_type || 'ssh') : document.getElementById('add-type').value;
+      const payload = {
+        conn_type: type,
+        device_type: document.getElementById('add-device-type').value,
+        remark: document.getElementById('add-remark').value.trim(),
+        username: editingBasicOnly && current ? (current.username || '') : document.getElementById('add-user').value.trim(),
+        password: editingBasicOnly && current ? (current.password || '') : document.getElementById('add-pass').value
+      };
+      if (editingBasicOnly && editingDeviceId) {
+        payload.device_id = editingDeviceId;
+        payload.basic_only = true;
+      }
+
+      if (type === 'serial') {
+        payload.serial_port = editingBasicOnly && current ? (current.serial_port || '') : document.getElementById('add-serial').value.trim();
+        payload.baud = editingBasicOnly && current ? parseInt(current.baud || 115200) : parseInt(document.getElementById('add-baud').value || '115200');
+      } else {
+        payload.ip = editingBasicOnly && current ? (current.ip || '') : document.getElementById('add-ip').value.trim();
+        payload.port = editingBasicOnly && current ? parseInt(current.port || (type === 'telnet' ? 23 : 22)) : parseInt(document.getElementById('add-port').value || (type === 'telnet' ? '23' : '22'));
+        if (!payload.ip) { alert('请输入 IP'); return; }
+      }
+
+      const r = await fetch('/api/device/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const d = await r.json();
+      if (!d.success) { alert(d.message || '保存失败'); return; }
+
+      closeModal('modal-device');
+      await loadDevices();
+      buildTopologyFromDevices();
+      await syncTopologyState();
+      renderAll();
+      addMsg('system', editingDeviceId ? '设备已更新' : '设备已保存');
+      editingDeviceId = null;
+      editingBasicOnly = false;
+    }
+
+    async function deleteDevice() {
+      if (!selectedId) { alert('请先选中设备'); return; }
+      if (!confirm('确定删除该设备吗？')) return;
+      const r = await fetch('/api/device/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_id: selectedId })
+      });
+      const d = await r.json();
+      if (!d.success) { alert(d.message || '删除失败'); return; }
+      selectedId = null;
+      await loadDevices();
+      buildTopologyFromDevices();
+      await syncTopologyState();
+      renderAll();
+      addMsg('system', '设备已删除');
+    }
+
+    async function testConnect() {
+      const d = devices.find(x => x.id === selectedId);
+      if (!d) { alert('请先选中设备'); return; }
+      addMsg('user', `测试连接 ${d.remark || d.name}`);
+      addMsg('system', '测试连接功能保留在下一版完善');
+    }
+
+    async function loadTopologyTemplates() { /* placeholder */ }
+    async function saveTopologyTemplate() { /* placeholder */ }
+    async function loadTopologyTemplate() { /* placeholder */ }
+
+    async function discoverTopology() {
+      const r = await fetch('/api/topology/discover', { method: 'POST' });
+      const d = await r.json();
+      if (!d.success) { alert(d.message || '识别失败'); return; }
+      topologyState = d.state || topologyState;
+      renderTopology();
+      addMsg('system', `拓扑识别完成，发现 ${d.discovered_links || 0} 条连线`);
+    }
+
+    async function applyTopology() {
+      const r = await fetch('/api/topology/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: topologyState })
+      });
+      const d = await r.json();
+      if (!d.success) { alert(d.message || '应用失败'); return; }
+      const ok = (d.results || []).filter(x => x.result && x.result.success).length;
+      const total = (d.results || []).length;
+      addMsg('system', `拓扑应用完成：${ok}/${total} 成功`);
+    }
+
+    async function loadLLM() {
+      try {
+        const r = await fetch('/api/llm/config');
+        const d = await r.json();
+        if (d.endpoint) {
+          document.getElementById('llm-endpoint').value = d.endpoint;
+          document.getElementById('llm-key').value = d.api_key || '';
+          if (d.model) document.getElementById('llm-model').innerHTML = `<option value="${d.model}">${d.model}</option>`;
+          document.getElementById('llm-status').textContent = 'LLM: ' + (d.model || '已配置');
+        }
+      } catch {}
+    }
+
+    async function getModels() {
+      const endpoint = document.getElementById('llm-endpoint').value.trim();
+      const api_key = document.getElementById('llm-key').value.trim();
+      if (!endpoint) { alert('请输入 Endpoint'); return; }
+      const r = await fetch('/api/llm/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint, api_key })
+      });
+      const d = await r.json();
+      if (!d.success || !(d.models || []).length) { alert(d.message || '获取失败'); return; }
+      document.getElementById('llm-model').innerHTML = d.models.map(m => `<option value="${m}">${m}</option>`).join('');
+    }
+
+    async function saveLLM() {
+      const payload = {
+        provider: 'openai',
+        endpoint: document.getElementById('llm-endpoint').value.trim(),
+        api_key: document.getElementById('llm-key').value.trim(),
+        model: document.getElementById('llm-model').value
+      };
+      if (!payload.endpoint) { alert('请输入 Endpoint'); return; }
+      const r = await fetch('/api/llm/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const d = await r.json();
+      if (!d.success) { alert(d.message || '保存失败'); return; }
+      closeModal('modal-llm');
+      document.getElementById('llm-status').textContent = 'LLM: ' + (payload.model || '已配置');
+      addMsg('system', 'LLM 配置已保存');
+    }
+
+    async function sendChat() {
+      const input = document.getElementById('chat-input');
+      const msg = input.value.trim();
+      if (!msg) return;
+      addMsg('user', msg);
+      input.value = '';
+      const d = devices.find(x => x.id === selectedId);
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg, context: { selected_device: d?.name || d?.remark } })
+      });
+      const res = await r.json();
+      addMsg('ai', (res.executed ? '✅ ' : '') + (res.response || '无响应'));
+    }
+
+    // ===== 配置中心（拓扑节点点击弹出） =====
+    function renderConfigPanel() {
+      const panel = document.getElementById('config-panel');
+      const tabsEl = document.getElementById('config-tabs');
+      const d = devices.find(x => x.id === selectedId);
+      if (!d) return;
+      const dtype = (d.device_type || '').toLowerCase();
+      const isRouter = dtype.includes('router');
+      const isFirewall = dtype.includes('firewall');
+      const isL3 = isL3Switch || isRouter || isFirewall);
+      const isSwitch = isSwitch === '查看', value: '查看',...},
+      ]);
+      const tabs = [
+        {label:'查看', value: '查看',...},
+      ]);
+      const panel = document.getElementById('config-panel');
+      panel.innerHTML = html;
+    }
+    function renderConfigPanel() {
+      const panel = document.getElementById('config-panel');
+      const d = devices.find(x => x.id === selectedId);
+      if (!d) {
+        panel.innerHTML = '<div style="color:#94a3b8;font-size:12px;">请先选中设备</div>';
+        return;
+      }
+
+      const dtype = (d.device_type || '').toLowerCase();
+      const isL2Switch = dtype.includes('layer2') || dtype.includes('switch');
+      const isL3Switch = dtype.includes('layer3');
+      const isRouter = dtype.includes('router');
+      const isFirewall = dtype.includes('firewall');
+      const isL3 = isL3Switch || isRouter || isFirewall;
+      const isSwitch = isL2Switch || isL3Switch;
+      const remark = d.remark || d.name;
+      const vendor = (d.vendor || '').toLowerCase();
+      const facts = d.facts || {};
+
+      // 设备类型标签
+      const typeLabels = { layer2_switch: '二层交换机', layer3_switch: '三层交换机', router: '路由器', firewall: '防火墙', unknown: '未识别' };
+      const typeLabel = typeLabels[dtype] || dtype;
+      const vendorLabels = { huawei: '华为', h3c: 'H3C/新华三', cisco: '思科', ruijie: '锐捷', juniper: 'Juniper' };
+      const vendorLabel = vendorLabels[vendor] || vendor || '未知';
+
+      let html = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="color:#67e8f9;font-size:14px;font-weight:700;">${remark}</div>
+          <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#1e293b;color:#94a3b8;">${typeLabel} · ${vendorLabel}</span>
+        </div>`;
+
+      // 状态摘要
+      if (facts.last_collected) {
+        html += `<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">`;
+        if (facts.vlan_count) html += `VLAN: ${facts.vlan_count}  `;
+        if (facts.up_interfaces) html += `UP: ${facts.up_interfaces}/${facts.total_interfaces || '?'}  `;
+        if (facts.trunk_ports?.length) html += `Trunk: ${facts.trunk_ports.length}  `;
+        html += `</div>`;
+      }
+
+      // 快速查看（所有设备都有）
+      html += buildQueryModule(remark);
+
+      // 交换机模块
+      if (isSwitch) {
+        html += buildVlanModule(remark);
+        html += buildInterfaceModule(remark);
+        html += buildTrunkModule(remark);
+      }
+
+      // 三层模块
+      if (isL3) {
+        html += buildL3Module(remark);
+      }
+
+      // 路由器专属
+      if (isRouter) {
+        html += buildNatModule(remark);
+        html += buildAclModule(remark);
+      }
+
+      // 防火墙专属
+      if (isFirewall) {
+        html += buildAclModule(remark);
+        html += buildNatModule(remark);
+        html += buildZoneModule(remark);
+      }
+
+      panel.innerHTML = html;
+    }
+
+    function buildVlanModule(device) {
+      return `
+      <div class="config-module" id="cfg-vlan">
+        <div class="config-module-header" onclick="toggleModule('cfg-vlan')">
+          <span>VLAN 配置</span><span>▼</span>
+        </div>
+        <div class="config-module-body">
+          <div class="form-group"><label>操作</label>
+            <select id="cfg-vlan-action"><option value="create">创建 VLAN</option><option value="delete">删除 VLAN</option><option value="view">查看 VLAN</option></select>
+          </div>
+          <div class="form-group"><label>VLAN ID</label><input id="cfg-vlan-id" placeholder="例如：10"></div>
+          <div class="form-group"><label>VLAN 名称（可选）</label><input id="cfg-vlan-name" placeholder="例如：财务部"></div>
+          <button class="config-exec-btn" onclick="execConfig('vlan', '${device}')">执行配置</button>
+          <div id="cfg-vlan-result" class="config-result" style="display:none;"></div>
+        </div>
+      </div>`;
+    }
+
+    function buildInterfaceModule(device) {
+      return `
+      <div class="config-module" id="cfg-if">
+        <div class="config-module-header" onclick="toggleModule('cfg-if')">
+          <span>接口配置</span><span>▼</span>
+        </div>
+        <div class="config-module-body">
+          <div class="form-group"><label>接口</label><input id="cfg-if-port" placeholder="例如：GE0/0/1 或 1/0/1"></div>
+          <div class="form-group"><label>操作</label>
+            <select id="cfg-if-action"><option value="desc">设置描述</option><option value="shutdown">关闭接口</option><option value="noshutdown">开启接口</option><option value="view">查看接口状态</option></select>
+          </div>
+          <div class="form-group"><label>描述内容（设置描述时填写）</label><input id="cfg-if-desc" placeholder="例如：连接财务部"></div>
+          <button class="config-exec-btn" onclick="execConfig('interface', '${device}')">执行配置</button>
+          <div id="cfg-if-result" class="config-result" style="display:none;"></div>
+        </div>
+      </div>`;
+    }
+
+    function buildTrunkModule(device) {
+      return `
+      <div class="config-module" id="cfg-trunk">
+        <div class="config-module-header" onclick="toggleModule('cfg-trunk')">
+          <span>Trunk / Access</span><span>▼</span>
+        </div>
+        <div class="config-module-body">
+          <div class="form-group"><label>接口</label><input id="cfg-trunk-port" placeholder="例如：GE0/0/1 或 1-4"></div>
+          <div class="form-group"><label>模式</label>
+            <select id="cfg-trunk-mode"><option value="access">Access</option><option value="trunk">Trunk</option></select>
+          </div>
+          <div class="form-group"><label>VLAN ID</label><input id="cfg-trunk-vlan" placeholder="Access 填 VLAN ID，Trunk 填允许的 VLAN"></div>
+          <div class="form-group"><label>允许 VLAN（Trunk 时，可选）</label><input id="cfg-trunk-allow" placeholder="例如：10,20,30 或 all"></div>
+          <button class="config-exec-btn" onclick="execConfig('trunk', '${device}')">执行配置</button>
+          <div id="cfg-trunk-result" class="config-result" style="display:none;"></div>
+        </div>
+      </div>`;
+    }
+
+    function buildL3Module(device) {
+      return `
+      <div class="config-module" id="cfg-l3">
+        <div class="config-module-header" onclick="toggleModule('cfg-l3')">
+          <span>三层配置（L3）</span><span>▼</span>
+        </div>
+        <div class="config-module-body">
+          <div class="form-group"><label>操作</label>
+            <select id="cfg-l3-action"><option value="svi">VLAN 接口 IP</option><option value="route">静态路由</option><option value="ospf">OSPF</option><option value="view-route">查看路由表</option></select>
+          </div>
+          <div class="form-group"><label>VLAN ID / 目标网段</label><input id="cfg-l3-target" placeholder="SVI 填 VLAN ID，路由填目标网段"></div>
+          <div class="form-group"><label>IP 地址</label><input id="cfg-l3-ip" placeholder="例如：192.168.10.1/24"></div>
+          <div class="form-group"><label>下一跳（静态路由时）</label><input id="cfg-l3-nexthop" placeholder="例如：10.0.0.2"></div>
+          <button class="config-exec-btn" onclick="execConfig('l3', '${device}')">执行配置</button>
+          <div id="cfg-l3-result" class="config-result" style="display:none;"></div>
+        </div>
+      </div>`;
+    }
+
+    function buildQueryModule(device) {
+      return `
+      <div class="config-module open" id="cfg-query">
+        <div class="config-module-header" onclick="toggleModule('cfg-query')">
+          <span>快速查看</span><span>▼</span>
+        </div>
+        <div class="config-module-body" style="display:grid; gap:6px;">
+          <button class="btn" onclick="quickQuery('${device}', '查看当前配置')">查看当前配置</button>
+          <button class="btn" onclick="quickQuery('${device}', '查看所有 VLAN 信息')">查看 VLAN</button>
+          <button class="btn" onclick="quickQuery('${device}', '查看接口状态')">查看接口</button>
+          <button class="btn" onclick="quickQuery('${device}', '查看路由表')">查看路由</button>
+          <button class="btn" onclick="quickQuery('${device}', '查看 ARP 表')">查看 ARP</button>
+          <button class="btn" style="background:#064e3b;border-color:#065f46;" onclick="collectDeviceFacts('${device}'); addMsg('system', '✅ 状态已采集');">🔄 采集设备状态</button>
+          <div id="cfg-query-result" class="config-result" style="display:none;"></div>
+        </div>
+      </div>`;
+    }
+
+    function buildAclModule(device) {
+      return `
+      <div class="config-module" id="cfg-acl">
+        <div class="config-module-header" onclick="toggleModule('cfg-acl')">
+          <span>ACL / 过滤规则</span><span>▼</span>
+        </div>
+        <div class="config-module-body">
+          <div class="form-group"><label>操作</label>
+            <select id="cfg-acl-action"><option value="create">创建 ACL 规则</option><option value="delete">删除 ACL 规则</option><option value="view">查看 ACL</option></select>
+          </div>
+          <div class="form-group"><label>规则编号</label><input id="cfg-acl-id" placeholder="例如：10"></div>
+          <div class="form-group"><label>动作</label>
+            <select id="cfg-acl-permit"><option value="permit">允许（permit）</option><option value="deny">拒绝（deny）</option></select>
+          </div>
+          <div class="form-group"><label>源地址</label><input id="cfg-acl-src" placeholder="例如：192.168.1.0/24 或 any"></div>
+          <div class="form-group"><label>目标地址</label><input id="cfg-acl-dst" placeholder="例如：10.0.0.0/8 或 any"></div>
+          <div class="form-group"><label>应用到接口（可选）</label><input id="cfg-acl-iface" placeholder="例如：GE0/0/1"></div>
+          <button class="config-exec-btn" onclick="execConfig('acl', '${device}')">执行配置</button>
+          <div id="cfg-acl-result" class="config-result" style="display:none;"></div>
+        </div>
+      </div>`;
+    }
+
+    function buildNatModule(device) {
+      return `
+      <div class="config-module" id="cfg-nat">
+        <div class="config-module-header" onclick="toggleModule('cfg-nat')">
+          <span>NAT 配置</span><span>▼</span>
+        </div>
+        <div class="config-module-body">
+          <div class="form-group"><label>操作</label>
+            <select id="cfg-nat-action"><option value="snat">源 NAT（SNAT/PAT）</option><option value="dnat">目的 NAT（DNAT/端口映射）</option><option value="view">查看 NAT 规则</option></select>
+          </div>
+          <div class="form-group"><label>源地址/网段</label><input id="cfg-nat-src" placeholder="例如：192.168.1.0/24"></div>
+          <div class="form-group"><label>外部接口 / 出接口</label><input id="cfg-nat-outside" placeholder="例如：GE0/0/1"></div>
+          <div class="form-group"><label>外部 IP（DNAT 时填写）</label><input id="cfg-nat-extip" placeholder="例如：202.100.1.1"></div>
+          <div class="form-group"><label>端口映射（DNAT 时填写）</label><input id="cfg-nat-port" placeholder="例如：8080→80"></div>
+          <button class="config-exec-btn" onclick="execConfig('nat', '${device}')">执行配置</button>
+          <div id="cfg-nat-result" class="config-result" style="display:none;"></div>
+        </div>
+      </div>`;
+    }
+
+    function buildZoneModule(device) {
+      return `
+      <div class="config-module" id="cfg-zone">
+        <div class="config-module-header" onclick="toggleModule('cfg-zone')">
+          <span>安全域 / Zone</span><span>▼</span>
+        </div>
+        <div class="config-module-body">
+          <div class="form-group"><label>操作</label>
+            <select id="cfg-zone-action"><option value="create">创建安全域</option><option value="add-if">添加接口到安全域</option><option value="policy">域间策略</option><option value="view">查看安全域</option></select>
+          </div>
+          <div class="form-group"><label>安全域名称</label><input id="cfg-zone-name" placeholder="例如：Trust、Untrust、DMZ"></div>
+          <div class="form-group"><label>接口（添加接口时）</label><input id="cfg-zone-iface" placeholder="例如：GE0/0/1"></div>
+          <div class="form-group"><label>策略描述（域间策略时）</label><input id="cfg-zone-policy" placeholder="例如：允许 Trust 到 Untrust 的所有流量"></div>
+          <button class="config-exec-btn" onclick="execConfig('zone', '${device}')">执行配置</button>
+          <div id="cfg-zone-result" class="config-result" style="display:none;"></div>
+        </div>
+      </div>`;
+    }
+
+    function toggleModule(id) {
+      document.getElementById(id).classList.toggle('open');
+    }
+
+    function buildConfigMessage(module, device) {
+      let msg = '';
+      switch (module) {
+        case 'vlan': {
+          const action = document.getElementById('cfg-vlan-action').value;
+          const vid = document.getElementById('cfg-vlan-id').value.trim();
+          const name = document.getElementById('cfg-vlan-name').value.trim();
+          if (action === 'view') { msg = `查看 ${device} 的 VLAN 信息`; break; }
+          if (!vid) { alert('请填写 VLAN ID'); return null; }
+          if (action === 'create') msg = `在 ${device} 上创建 VLAN ${vid}${name ? '，名称为 ' + name : ''}`;
+          else if (action === 'delete') msg = `在 ${device} 上删除 VLAN ${vid}`;
+          break;
+        }
+        case 'interface': {
+          const port = document.getElementById('cfg-if-port').value.trim();
+          const action = document.getElementById('cfg-if-action').value;
+          const desc = document.getElementById('cfg-if-desc').value.trim();
+          if (action === 'view') { msg = `查看 ${device} 的接口 ${port || '所有接口'} 状态`; break; }
+          if (!port) { alert('请填写接口'); return null; }
+          if (action === 'desc') msg = `在 ${device} 上给接口 ${port} 设置描述为"${desc}"`;
+          else if (action === 'shutdown') msg = `在 ${device} 上关闭接口 ${port}`;
+          else if (action === 'noshutdown') msg = `在 ${device} 上开启接口 ${port}`;
+          break;
+        }
+        case 'trunk': {
+          const port = document.getElementById('cfg-trunk-port').value.trim();
+          const mode = document.getElementById('cfg-trunk-mode').value;
+          const vlan = document.getElementById('cfg-trunk-vlan').value.trim();
+          const allow = document.getElementById('cfg-trunk-allow').value.trim();
+          if (!port) { alert('请填写接口'); return null; }
+          if (mode === 'access') {
+            msg = `在 ${device} 上将接口 ${port} 配置为 Access 模式，加入 VLAN ${vlan || '?'}`;
+          } else {
+            msg = `在 ${device} 上将接口 ${port} 配置为 Trunk 模式`;
+            if (vlan) msg += `，默认 VLAN 为 ${vlan}`;
+            if (allow) msg += `，允许 VLAN ${allow}`;
+          }
+          break;
+        }
+        case 'l3': {
+          const action = document.getElementById('cfg-l3-action').value;
+          const target = document.getElementById('cfg-l3-target').value.trim();
+          const ip = document.getElementById('cfg-l3-ip').value.trim();
+          const nexthop = document.getElementById('cfg-l3-nexthop').value.trim();
+          if (action === 'view-route') { msg = `查看 ${device} 的路由表`; break; }
+          if (action === 'svi') {
+            if (!target || !ip) { alert('请填写 VLAN ID 和 IP 地址'); return null; }
+            msg = `在 ${device} 上配置 VLAN ${target} 的三层接口，IP 地址为 ${ip}`;
+          } else if (action === 'route') {
+            if (!target || !nexthop) { alert('请填写目标网段和下一跳'); return null; }
+            msg = `在 ${device} 上配置静态路由，目标 ${target}，下一跳 ${nexthop}`;
+          } else if (action === 'ospf') {
+            if (!target) { alert('请填写网段'); return null; }
+            msg = `在 ${device} 上配置 OSPF，宣告网段 ${target}`;
+          }
+          break;
+        }
+        case 'acl': {
+          const action = document.getElementById('cfg-acl-action').value;
+          const ruleId = document.getElementById('cfg-acl-id').value.trim();
+          const permit = document.getElementById('cfg-acl-permit').value;
+          const src = document.getElementById('cfg-acl-src').value.trim();
+          const dst = document.getElementById('cfg-acl-dst').value.trim();
+          const iface = document.getElementById('cfg-acl-iface').value.trim();
+          if (action === 'view') { msg = `查看 ${device} 的 ACL 规则`; break; }
+          if (action === 'create') {
+            if (!src && !dst) { alert('请填写源或目标地址'); return null; }
+            msg = `在 ${device} 上创建 ACL 规则，编号 ${ruleId || '自动'}，动作 ${permit}，源 ${src || 'any'}，目标 ${dst || 'any'}`;
+            if (iface) msg += `，应用到接口 ${iface}`;
+          } else if (action === 'delete') {
+            if (!ruleId) { alert('请填写规则编号'); return null; }
+            msg = `在 ${device} 上删除 ACL 规则编号 ${ruleId}`;
+          }
+          break;
+        }
+        case 'nat': {
+          const action = document.getElementById('cfg-nat-action').value;
+          const src = document.getElementById('cfg-nat-src').value.trim();
+          const outside = document.getElementById('cfg-nat-outside').value.trim();
+          const extip = document.getElementById('cfg-nat-extip').value.trim();
+          const port = document.getElementById('cfg-nat-port').value.trim();
+          if (action === 'view') { msg = `查看 ${device} 的 NAT 规则`; break; }
+          if (action === 'snat') {
+            if (!src || !outside) { alert('请填写源地址和出接口'); return null; }
+            msg = `在 ${device} 上配置源 NAT，源 ${src}，出接口 ${outside}，使用接口 IP 做地址转换`;
+          } else if (action === 'dnat') {
+            if (!extip) { alert('请填写外部 IP'); return null; }
+            msg = `在 ${device} 上配置目的 NAT，外部 IP ${extip}`;
+            if (port) msg += `，端口映射 ${port}`;
+            if (src) msg += `，内网目标 ${src}`;
+          }
+          break;
+        }
+        case 'zone': {
+          const action = document.getElementById('cfg-zone-action').value;
+          const name = document.getElementById('cfg-zone-name').value.trim();
+          const iface = document.getElementById('cfg-zone-iface').value.trim();
+          const policy = document.getElementById('cfg-zone-policy').value.trim();
+          if (action === 'view') { msg = `查看 ${device} 的安全域配置`; break; }
+          if (!name) { alert('请填写安全域名称'); return null; }
+          if (action === 'create') msg = `在 ${device} 上创建安全域 ${name}`;
+          else if (action === 'add-if') msg = `在 ${device} 上将接口 ${iface || '?'} 添加到安全域 ${name}`;
+          else if (action === 'policy') msg = `在 ${device} 上配置域间策略：${policy || '请配置策略'}`;
+          break;
+        }
+      }
+      return msg;
+    }
+
+    async function execConfig(module, device) {
+      const msg = buildConfigMessage(module, device);
+      if (!msg) return;
+
+      const resultEl = document.getElementById(`cfg-${module}-result`);
+      resultEl.style.display = 'block';
+      resultEl.className = 'config-result';
+      resultEl.textContent = '⏳ 执行中...';
+
+      addMsg('user', msg);
+
+      const d = devices.find(x => x.id === selectedId);
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg, context: { selected_device: d?.name || d?.remark } })
+      });
+      const res = await r.json();
+
+      if (res.success) {
+        resultEl.className = 'config-result success';
+        resultEl.textContent = res.response || '执行成功';
+        addMsg('ai', '✅ ' + (res.response || '执行成功'));
+        // 执行成功后自动采集状态
+        collectDeviceFacts(d?.name || d?.remark);
+      } else {
+        resultEl.className = 'config-result error';
+        resultEl.textContent = res.message || '执行失败';
+        addMsg('ai', '❌ ' + (res.message || '执行失败'));
+      }
+    }
+
+    async function quickQuery(device, msg) {
+      const resultEl = document.getElementById('cfg-query-result');
+      resultEl.style.display = 'block';
+      resultEl.className = 'config-result';
+      resultEl.textContent = '⏳ 查询中...';
+
+      addMsg('user', msg);
+
+      const d = devices.find(x => x.id === selectedId);
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg, context: { selected_device: d?.name || d?.remark } })
+      });
+      const res = await r.json();
+
+      if (res.success) {
+        resultEl.className = 'config-result success';
+        resultEl.textContent = res.response || '查询完成';
+        addMsg('ai', '✅ ' + (res.response || '查询完成'));
+      } else {
+        resultEl.className = 'config-result error';
+        resultEl.textContent = res.message || '查询失败';
+        addMsg('ai', '❌ ' + (res.message || '查询失败'));
+      }
+    }
+
+    async function collectDeviceFacts(deviceName) {
+      if (!deviceName) return;
+      try {
+        await fetch('/api/device/collect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device: deviceName })
+        });
+        await loadDevices();
+        buildTopologyFromDevices();
+        const nodes = topologyState.nodes || [];
+        for (const n of nodes) {
+          const dev = devices.find(x => x.id === n.id);
+          if (dev?.facts) n.facts = dev.facts;
+        }
+        renderTopology();
+      } catch (e) {
+        console.error('状态采集失败:', e);
+      }
+    }
+
+    async function refreshAllFacts() {
+      if (!devices.length) { addMsg('system', '暂无设备'); return; }
+      addMsg('system', '⏳ 正在采集所有设备状态...');
+      for (const d of devices) {
+        const name = d.name || d.remark;
+        if (name) await collectDeviceFacts(name);
+      }
+      addMsg('system', '✅ 状态采集完成');
+    }
+  </script>
+</body>
+</html>

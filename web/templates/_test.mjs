@@ -1,247 +1,6 @@
-﻿<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NetOps AI</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: sans-serif; background: #111827; color: #e5e7eb; }
-
-    .header { height: 60px; background: #0f172a; border-bottom: 1px solid #1f2937; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
-    .title { font-weight: 700; font-size: 20px; }
-    .title span { color: #22d3ee; }
-    .status { color: #94a3b8; font-size: 13px; }
-
-    .toolbar { height: 48px; background: #111827; border-bottom: 1px solid #1f2937; display: flex; align-items: center; gap: 8px; padding: 0 16px; }
-    .btn { padding: 8px 12px; border: 1px solid #334155; background: #1e293b; color: #e5e7eb; border-radius: 6px; cursor: pointer; display: inline-block; text-align: center; min-height: 20px; }
-    .btn:hover { border-color: #22d3ee; }
-
-    .layout { height: calc(100vh - 108px); display: grid; grid-template-columns: 200px 1fr; }
-
-    .left { border-right: 1px solid #1f2937; background: #0b1220; padding: 8px; overflow: auto; }
-    .left h3 { margin-bottom: 10px; color: #67e8f9; font-size: 14px; }
-    .device-item { padding: 8px; border: 1px solid #1f2937; border-radius: 6px; background: #0f172a; margin-bottom: 4px; cursor: pointer; }
-    .device-item:hover { border-color: #22d3ee; }
-    .device-name { font-weight: 600; font-size: 13px; }
-    .device-ip { color: #6b7280; font-size: 11px; margin-top: 2px; }
-    .dev-group { margin-bottom: 4px; }
-    .dev-group-header { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: #0f172a; color: #94a3b8; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 4px; min-height: 28px; }
-    .dev-group-header:hover { background: #1e293b; color: #e5e7eb; }
-    .dev-group-arrow { font-size: 9px; transition: transform 0.15s; }
-    .dev-group.open .dev-group-arrow { transform: rotate(90deg); }
-    .dev-group-body { display: none; }
-    .dev-group.open .dev-group-body { display: block; }
-
-    .center { display: flex; flex-direction: column; min-width: 0; overflow-y: auto; }
-    .topology-panel { border-bottom: 1px solid #1f2937; padding: 6px; flex-shrink: 0; }
-    .topology-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .topology-infinite { position: relative; border: 1px solid #164e63; border-radius: 8px; background: radial-gradient(circle at 20% 20%, #0b1220 0%, #05080f 100%); height: 480px; min-height: 200px; max-height: 80vh; overflow: hidden; resize: vertical; }
-    .topology-world { position: absolute; inset: 0; transform-origin: 0 0; }
-    #topology-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-    #topology-node-layer { position: absolute; inset: 0; }
-    .topo-node { position: absolute; width: 120px; min-height: 32px; border: 1px solid #22d3ee; border-radius: 8px; background: rgba(6, 15, 27, 0.9); box-shadow: 0 0 10px rgba(34, 211, 238, 0.3); padding: 5px 7px; cursor: pointer; user-select: none; }
-    .topo-node:hover { box-shadow: 0 0 16px rgba(56, 189, 248, 0.5); }
-    .topo-node.router { border-color: #60a5fa; box-shadow: 0 0 10px rgba(96, 165, 250, 0.35); border-radius: 999px; }
-    .topo-node.firewall { border-color: #fb923c; box-shadow: 0 0 10px rgba(251, 146, 60, 0.3); border-radius: 4px; }
-    .topo-node.switch { border-color: #34d399; box-shadow: 0 0 10px rgba(52, 211, 153, 0.3); border-radius: 8px; }
-    .topo-node.selected { box-shadow: 0 0 24px rgba(245, 158, 11, 0.8), 0 0 48px rgba(245, 158, 11, 0.3) !important; border-color: #f59e0b !important; border-width: 2px; }
-    .topo-head { display:flex; align-items:center; gap:4px; }
-    .node-dot { width: 8px; height: 8px; border-radius: 50%; background:#22d3ee; box-shadow:0 0 6px #22d3ee; flex: 0 0 8px; }
-    .node-icon { width: 14px; height: 14px; flex: 0 0 14px; }
-    .node-remark { font-size: 11px; font-weight: 700; color: #d1fafb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 16px; }
-    .node-chips { display: flex; gap: 2px; flex-wrap: nowrap; overflow: hidden; margin-top: 2px; }
-    .chip { font-size: 9px; padding: 0 3px; border-radius: 2px; background: rgba(34,211,238,0.15); color: #67e8f9; white-space: nowrap; line-height: 12px; }
-    .chip.warn { background: rgba(251,146,60,0.2); color: #fb923c; }
-    .chip.ok { background: rgba(52,211,153,0.2); color: #34d399; }
-    .chip.ok { background: rgba(52,211,153,0.2); color: #34d399; }
-    .topo-edge { stroke: #22d3ee; stroke-width: 1.8; opacity: 0.9; fill: none; }
-    .topo-edge.trunk { stroke: #f59e0b; }
-    .topo-edge.access { stroke: #22d3ee; }
-    .topo-edge.l3-p2p { stroke: #34d399; stroke-dasharray: 5 4; }
-    .port-label { fill: #7dd3fc; font-size: 10px; }
-    .port-label.right { text-anchor: end; }
-
-    .links { border: 1px solid #1f2937; border-radius: 8px; background: #0f172a; padding: 8px; max-height: 120px; overflow: auto; }
-    .link-row { font-size: 12px; color: #cbd5e1; padding: 4px 0; border-bottom: 1px solid #1f2937; }    .link-row:last-child { border-bottom: none; }
-
-    .chat-panel { padding: 10px; display: flex; flex-direction: column; height: 260px; min-height: 120px; max-height: 80vh; resize: vertical; overflow: hidden; flex-shrink: 0; }
-    .messages { border: 1px solid #1f2937; border-radius: 8px; background: #0b1220; padding: 10px; overflow: auto; flex: 1; }
-    .msg { margin-bottom: 8px; padding: 8px; border-radius: 6px; font-size: 13px; }
-    .msg-user { background: #1d4ed8; color: #fff; text-align: right; }
-    .msg-ai { background: #1f2937; }
-    .msg-system { background: #334155; color: #cbd5e1; }
-    .msg pre { background: #0f172a; border: 1px solid #1e293b; border-radius: 6px; padding: 8px; margin: 6px 0; font-size: 12px; color: #94a3b8; white-space: pre-wrap; word-break: break-all; overflow-x: auto; max-height: 200px; overflow-y: auto; }
-    .msg .cmd-label { font-size: 11px; color: #67e8f9; margin-bottom: 2px; }
-    .msg .answer { color: #e5e7eb; margin-top: 6px; line-height: 1.5; }
-    .msg .answer strong { color: #67e8f9; }
-    .chat-input { display: flex; gap: 8px; margin-top: 8px; }
-    .chat-input input { flex: 1; border: 1px solid #334155; background: #0f172a; color: #e5e7eb; border-radius: 6px; padding: 8px; }
-
-    .detail-row { display: flex; justify-content: space-between; border-bottom: 1px solid #1f2937; padding: 6px 0; }
-    .detail-key { width: 80px; color: #94a3b8; font-size: 12px; flex-shrink:0; }
-    .detail-val { flex: 1; color: #e5e7eb; font-size: 13px; margin-left: 8px; }
-
-    .config-module { border: 1px solid #1f2937; border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
-    .config-module-header { padding: 8px 10px; background: #0f172a; color: #67e8f9; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
-    .config-module-header:hover { background: #1e293b; }
-    .config-module-body { padding: 10px; display: none; }
-    .config-module.open .config-module-body { display: block; }
-    .config-exec-btn { width: 100%; padding: 8px; background: #1d4ed8; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; margin-top: 6px; }
-    .config-exec-btn:hover { background: #2563eb; }
-    .config-exec-btn:disabled { background: #334155; cursor: not-allowed; }
-    .config-result { margin-top: 6px; padding: 6px; border-radius: 6px; font-size: 12px; max-height: 120px; overflow: auto; }
-    .config-result.success { background: #064e3b; color: #6ee7b7; }
-    .config-result.error { background: #450a0a; color: #fca5a5; }
-
-    .cfg-tab { padding: 8px 14px; border: none; background: transparent; color: #94a3b8; font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
-    .cfg-tab.active { color: #22d3ee; border-bottom-color: #22d3ee; }
-    .cfg-tab:hover { color: #67e8f9; }
-    .cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-    .cfg-grid .btn { font-size: 12px; padding: 8px 10px; text-align: left; min-height: 32px; }
-    .cfg-grid .btn:hover { border-color: #22d3ee; background: #1e293b; }
-
-    .modal { display: none; position: fixed; inset: 0; background: rgba(2, 6, 23, 0.75); align-items: center; justify-content: center; z-index: 1000; }
-    .modal.show { display: flex; }
-    .modal-box { width: 460px; max-width: 92vw; background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 14px; z-index: 1001; position: relative; }
-    .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; position: relative; z-index: 10; }
-    .close { background: #1e293b; color: #e5e7eb; border: 1px solid #475569; font-size: 20px; cursor: pointer; min-width: 32px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; padding: 4px; line-height: 1; flex-shrink: 0; }
-    .close:hover { color: #ef4444; background: rgba(239,68,68,0.15); border-color: #ef4444; }
-    .form-group { margin-bottom: 10px; }
-    .form-group label { display: block; margin-bottom: 4px; color: #94a3b8; font-size: 12px; }
-    .form-group input, .form-group select { width: 100%; border: 1px solid #334155; background: #0b1220; color: #e5e7eb; border-radius: 6px; padding: 8px; }
-    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <div class="title">NETOPS <span>AI</span></div>
-    <div class="status"><span id="llm-status">LLM: 未配置</span> | <span id="device-count">设备: 0</span></div>
-  </div>
-
-  <div class="toolbar">
-    <button class="btn" id="btn-add">+ 添加设备</button>
-    <button class="btn" id="btn-llm">LLM 设置</button>
-  </div>
-
-  <div class="layout">
-    <aside class="left">
-      <h3>设备列表</h3>
-      <div id="device-list"></div>
-    </aside>
-
-    <main class="center">
-      <section class="topology-panel">
-        <div class="topology-actions">
-          <label style="font-size:12px;color:#94a3b8;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="topo-autorefresh"> 实时刷新</label>
-          <select id="topo-refresh-interval" style="font-size:11px;padding:4px 6px;background:#0f172a;color:#e5e7eb;border:1px solid #334155;border-radius:4px;min-height:28px;">
-            <option value="5">5秒</option><option value="10" selected>10秒</option><option value="30">30秒</option><option value="60">60秒</option>
-          </select>
-          <button class="btn" id="btn-refresh-now" style="font-size:11px;padding:6px 10px;min-height:28px;">立即刷新</button>
-        </div>
-        <div class="topology-infinite" id="topology-infinite">
-          <div class="topology-world" id="topology-world">
-            <svg id="topology-svg"></svg>
-            <div id="topology-node-layer"></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="chat-panel">
-        <div class="messages" id="messages">
-          <div class="msg msg-system">拓扑在上，对话在下。Ctrl+点击拓扑节点可多选设备，多选后操作会批量执行。</div>
-        </div>
-        <div class="chat-input">
-          <input id="chat-input" placeholder="输入命令或问题（拓扑中选中的设备为目标）">
-          <button class="btn" id="btn-stop" style="display:none;background:#dc2626;border-color:#dc2626;color:#fff;">停止</button>
-          <button class="btn" id="btn-send">发送</button>
-        </div>
-      </section>
-    </main>
-  </div>
-
-  <!-- 设备详情弹窗 -->
-  <div class="modal" id="modal-device-detail">
-    <div class="modal-box" style="width:480px;max-height:80vh;display:flex;flex-direction:column;">
-      <div class="modal-head"><strong id="detail-modal-title">设备详情</strong><button class="close" onclick="closeModal('modal-device-detail')">×</button></div>
-      <div id="detail-content"></div>
-      <div style="margin-top:10px;display:grid;gap:8px;">
-        <button class="btn" id="btn-test-detail">测试连接</button>
-        <button class="btn" id="btn-conn-edit-detail">编辑</button>
-        <button class="btn" id="btn-delete-detail">删除设备</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal" id="modal-device">
-    <div class="modal-box">
-      <div class="modal-head"><strong id="modal-device-title">添加设备</strong><button class="close" onclick="closeModal('modal-device')">×</button></div>
-      <div class="form-group"><label>连接方式</label><select id="add-type" onchange="toggleFields()"><option value="ssh">SSH</option><option value="telnet">Telnet</option><option value="serial">串口</option></select></div>
-      <div class="form-group"><label>设备类型</label><select id="add-device-type"><option value="layer2_switch">二层交换机</option><option value="layer3_switch">三层交换机</option><option value="router">路由器</option><option value="firewall">防火墙</option><option value="unknown" selected>自动识别</option></select></div>
-      <div id="net-fields">
-        <div class="form-group"><label>IP</label><input id="add-ip" placeholder="192.168.1.1"></div>
-        <div class="form-group"><label>端口</label><input id="add-port" value="22"></div>
-      </div>
-      <div id="serial-fields" style="display:none;">
-        <div class="form-group"><label>串口</label><input id="add-serial" placeholder="COM3"></div>
-        <div class="form-group"><label>波特率</label><select id="add-baud"><option value="9600">9600</option><option value="115200" selected>115200</option></select></div>
-      </div>
-      <div class="form-group"><label>备注</label><input id="add-remark" placeholder="例如：上海核心"></div>
-      <div class="form-group"><label>用户名</label><input id="add-user" placeholder="admin"></div>
-      <div class="form-group"><label>密码</label><input id="add-pass" type="password"></div>
-      <div class="modal-actions">
-        <button class="btn" id="btn-save-device" style="background:#1d4ed8;color:#fff;">保存</button>
-        <button class="btn" id="btn-test-device" style="display:none;">测试连接</button>
-        <button class="btn" id="btn-delete-device" style="background:#7c2d12;border-color:#7c2d12;display:none;">删除</button>
-        <button class="btn" onclick="closeModal('modal-device')" style="margin-left:auto;">取消</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal" id="modal-conn">
-    <div class="modal-box">
-      <div class="modal-head"><strong>连接方式编辑</strong><button class="close" onclick="closeModal('modal-conn')">×</button></div>
-      <div class="form-group"><label>连接方式</label><select id="conn-type" onchange="toggleConnFields()"><option value="ssh">SSH</option><option value="telnet">Telnet</option><option value="serial">串口</option></select></div>
-      <div id="conn-net-fields">
-        <div class="form-group"><label>IP</label><input id="conn-ip" placeholder="192.168.1.1"></div>
-        <div class="form-group"><label>端口</label><input id="conn-port" value="22"></div>
-      </div>
-      <div id="conn-serial-fields" style="display:none;">
-        <div class="form-group"><label>串口</label><input id="conn-serial" placeholder="COM3"></div>
-        <div class="form-group"><label>波特率</label><select id="conn-baud"><option value="9600">9600</option><option value="115200" selected>115200</option></select></div>
-      </div>
-      <div class="form-group"><label>用户名</label><input id="conn-user" placeholder="admin"></div>
-      <div class="form-group"><label>密码</label><input id="conn-pass" type="password"></div>
-      <div class="modal-actions"><button class="btn" onclick="closeModal('modal-conn')">取消</button><button class="btn" id="btn-save-conn">保存连接方式</button></div>
-    </div>
-  </div>
-
-  <div class="modal" id="modal-llm">
-    <div class="modal-box">
-      <div class="modal-head"><strong>LLM 配置</strong><button class="close" onclick="closeModal('modal-llm')">×</button></div>
-      <div class="form-group"><label>Endpoint</label><input id="llm-endpoint" placeholder="http://127.0.0.1:1234/v1"></div>
-      <div class="form-group"><label>API Key（可选）</label><input id="llm-key"></div>
-      <div class="form-group"><label>模型</label><select id="llm-model"><option value="">-- 获取 --</option></select></div>
-      <div class="modal-actions"><button class="btn" id="btn-get-models">获取模型</button><button class="btn" id="btn-save-llm">保存</button></div>
-    </div>
-  </div>
-
-  <div class="modal" id="modal-config">
-    <div class="modal-box" style="width:680px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;">
-      <div class="modal-head">
-        <strong id="config-modal-title">配置中心</strong>
-        <span id="config-device-type" style="margin-left:8px;font-size:11px;color:#94a3b8;"></span>
-        <button class="close" onclick="closeModal('modal-config')">×</button>
-      </div>
-      <div id="config-tabs" style="display:flex;gap:0;border-bottom:1px solid #1f2937;margin-bottom:10px;flex-shrink:0;overflow-x:auto;"></div>
-      <div id="config-panel" style="flex:1;overflow-y:auto;padding-right:4px;"></div>
-    </div>
-  </div>
-
-  <script>
+try { 
     let devices = [];
     let selectedId = null;
-    let selectedIds = new Set();  // 多选设备集合
     let editingDeviceId = null;
     let editingBasicOnly = false;
     let topologyState = { nodes: [], links: [], version: 1 };
@@ -251,39 +10,30 @@
     let panning = false;
 
     document.addEventListener('DOMContentLoaded', async () => {
-      console.log('[NetOps] DOM loaded, initializing...');
-      loadChatHistory();
       bindEvents();
-      console.log('[NetOps] Events bound');
       await loadDevices();
-      console.log('[NetOps] Devices loaded:', devices.length);
       await loadTopologyState();
-      console.log('[NetOps] Topology state loaded, links:', (topologyState.links||[]).length);
       await loadTopologyTemplates();
       await loadLLM();
       buildTopologyFromDevices();
       renderAll();
-      console.log('[NetOps] Init complete. openDeviceDetail:', typeof openDeviceDetail, 'openTopologyDeviceConfig:', typeof openTopologyDeviceConfig);
     });
 
     function bindEvents() {
       document.getElementById('btn-add').onclick = openAddDevice;
       document.getElementById('btn-save-device').onclick = saveDevice;
-      document.getElementById('btn-test-device').onclick = testCurrentDevice;
-      document.getElementById('btn-delete-device').onclick = deleteCurrentDevice;
       document.getElementById('btn-save-conn').onclick = saveConnConfig;
       document.getElementById('btn-send').onclick = sendChat;
-      document.getElementById('btn-stop').onclick = stopChat;
       document.getElementById('chat-input').onkeydown = e => { if (e.key === 'Enter') sendChat(); };
 
       document.getElementById('btn-llm').onclick = () => openModal('modal-llm');
       document.getElementById('btn-get-models').onclick = getModels;
       document.getElementById('btn-save-llm').onclick = saveLLM;
 
+      document.getElementById('btn-discover').onclick = discoverTopology;
+      document.getElementById('btn-apply').onclick = applyTopology;
+      document.getElementById('btn-refresh-facts').onclick = refreshAllFacts;
       document.getElementById('btn-refresh-now').onclick = async () => {
-        const btn = document.getElementById('btn-refresh-now');
-        if (btn.disabled) return;
-        btn.disabled = true; btn.textContent = '发现中...';
         addMsg('system', '⏳ 重新发现拓扑...');
         try {
           const r = await fetch('/api/topology/discover', { method: 'POST' });
@@ -300,9 +50,6 @@
           }
         } catch (e) {
           addMsg('system', '❌ 请求失败');
-        } finally {
-          const btn = document.getElementById('btn-refresh-now');
-          btn.disabled = false; btn.textContent = '立即刷新';
         }
       };
       document.getElementById('topo-autorefresh').onchange = function() {
@@ -312,119 +59,17 @@
       document.getElementById('topo-refresh-interval').onchange = function() {
         if(document.getElementById('topo-autorefresh').checked) startTopoRefresh(parseInt(this.value));
       };
-
       initTopologyInteractions();
     }
 
     function openModal(id) { document.getElementById(id).classList.add('show'); }
     function closeModal(id) { document.getElementById(id).classList.remove('show'); }
 
-    const CHAT_HISTORY_KEY = 'netops_chat_history';
-    const MAX_HISTORY = 50;
-
-    function loadChatHistory() {
-      try {
-        const h = JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) || '[]');
-        h.forEach(m => {
-          const box = document.getElementById('messages');
-          const cls = m.type === 'user' ? 'msg-user' : (m.type === 'system' ? 'msg-system' : 'msg-ai');
-          const html = m.type === 'ai' ? formatAIResponse(m.text) : escapeHtml(m.text);
-          box.innerHTML += `<div class="msg ${cls}">${html}</div>`;
-        });
-        const box = document.getElementById('messages');
-        box.scrollTop = box.scrollHeight;
-      } catch(e) {}
-    }
-
     function addMsg(type, text) {
       const box = document.getElementById('messages');
       const cls = type === 'user' ? 'msg-user' : (type === 'system' ? 'msg-system' : 'msg-ai');
-      let html = '';
-      if (type === 'ai' && text) {
-        html = formatAIResponse(text);
-      } else {
-        html = escapeHtml(text);
-      }
-      box.innerHTML += `<div class="msg ${cls}">${html}</div>`;
+      box.innerHTML += `<div class="msg ${cls}">${text}</div>`;
       box.scrollTop = box.scrollHeight;
-      // 持久化
-      try {
-        const h = JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) || '[]');
-        h.push({type, text});
-        if (h.length > MAX_HISTORY) h.splice(0, h.length - MAX_HISTORY);
-        localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(h));
-      } catch(e) {}
-    }
-
-    function escapeHtml(s) {
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    }
-
-    function formatAIResponse(text) {
-      // 把 AI 回复按"命令:"/"命令：" 和 "输出:"/"输出：" 分段
-      // 模式：命令: xxx \n 输出: yyy \n --- \n 总结内容
-      let html = '';
-      const parts = text.split(/---+/);
-      const cmdSection = parts[0] || '';
-      const answerSection = parts.slice(1).join('---').trim();
-
-      // 解析命令和输出
-      const cmdBlocks = [];
-      const cmdRegex = /(?:命令|命令)[：:]\s*(.*?)(?=(?:输出|输出)[：:]|$)/gs;
-      const outRegex = /(?:输出|输出)[：:]\s*(.*?)(?=---|(?:命令|命令)[：:]|$)/gs;
-
-      // 简单分段：按 "命令:" 和 "输出:" 切
-      let remaining = cmdSection;
-      let hasCmd = false;
-      while (remaining.length > 0) {
-        const cmdIdx = remaining.search(/(?:命令)[：:]/);
-        const outIdx = remaining.search(/(?:输出)[：:]/);
-
-        if (cmdIdx >= 0 || outIdx >= 0) {
-          hasCmd = true;
-          // 取最早的那个
-          const firstIdx = (cmdIdx >= 0 && outIdx >= 0) ? Math.min(cmdIdx, outIdx) : Math.max(cmdIdx, outIdx);
-          const before = remaining.substring(0, firstIdx).trim();
-          if (before) html += `<div class="answer">${escapeHtml(before)}</div>`;
-          remaining = remaining.substring(firstIdx);
-
-          if (remaining.startsWith('命令') || remaining.startsWith('命令')) {
-            const endCmd = remaining.indexOf('输出');
-            const cmdText = endCmd >= 0 ? remaining.substring(3, endCmd).replace(/[：:]/, '').trim() : remaining.substring(3).replace(/[：:]/, '').trim();
-            html += `<div class="cmd-label">📌 命令</div>`;
-            html += `<pre>${escapeHtml(cmdText)}</pre>`;
-            remaining = endCmd >= 0 ? remaining.substring(endCmd) : '';
-          } else if (remaining.startsWith('输出') || remaining.startsWith('输出')) {
-            const endOut = remaining.indexOf('---');
-            const endCmd2 = remaining.indexOf('命令', 3);
-            let endPos = remaining.length;
-            if (endOut >= 0) endPos = Math.min(endPos, endOut);
-            if (endCmd2 >= 0) endPos = Math.min(endPos, endCmd2);
-            const outText = remaining.substring(3, endPos).replace(/[：:]/, '').trim();
-            html += `<div class="cmd-label">📋 输出</div>`;
-            html += `<pre>${escapeHtml(outText)}</pre>`;
-            remaining = remaining.substring(endPos);
-          } else {
-            html += escapeHtml(remaining);
-            break;
-          }
-        } else {
-          if (remaining.trim()) html += `<div class="answer">${escapeHtml(remaining)}</div>`;
-          break;
-        }
-      }
-
-      // 答案部分（--- 之后的内容，直接追加不额外加标题）
-      if (answerSection) {
-        html += `<div class="answer" style="margin-top:8px; padding-top:6px; border-top:1px solid #334155;">${escapeHtml(answerSection)}</div>`;
-      }
-
-      // 如果没有解析出任何命令块，直接显示原文
-      if (!hasCmd && !answerSection) {
-        html = `<div class="answer">${escapeHtml(text)}</div>`;
-      }
-
-      return html;
     }
 
     function toggleFields() {
@@ -459,8 +104,6 @@
       document.getElementById('add-type').closest('.form-group').style.display = 'block';
       document.getElementById('add-user').closest('.form-group').style.display = 'block';
       document.getElementById('add-pass').closest('.form-group').style.display = 'block';
-      document.getElementById('btn-delete-device').style.display = 'none';
-      document.getElementById('btn-test-device').style.display = 'none';
       toggleFields();
       openModal('modal-device');
     }
@@ -469,8 +112,8 @@
       const d = devices.find(x => x.id === id);
       if (!d) return;
       editingDeviceId = id;
-      editingBasicOnly = false;
-      document.getElementById('modal-device-title').textContent = '编辑连接配置';
+      editingBasicOnly = true;
+      document.getElementById('modal-device-title').textContent = '编辑设备基础信息（LLM）';
       document.getElementById('add-type').value = d.conn_type || 'ssh';
       toggleFields();
       if (d.conn_type === 'serial') {
@@ -478,21 +121,19 @@
         document.getElementById('add-baud').value = String(d.baud || 115200);
       } else {
         document.getElementById('add-ip').value = d.ip || '';
-        document.getElementById('add-port').value = String(d.port || (d.conn_type === 'telnet' ? 23 : 22));
+        document.getElementById('add-port').value = String(d.port || 22);
       }
       document.getElementById('add-device-type').value = d.device_type || 'unknown';
       document.getElementById('add-remark').value = d.remark || '';
       document.getElementById('add-user').value = d.username || '';
       document.getElementById('add-pass').value = d.password || '';
 
-      // 左侧编辑：全部字段都可编辑
-      document.getElementById('add-type').closest('.form-group').style.display = 'block';
-      document.getElementById('add-user').closest('.form-group').style.display = 'block';
-      document.getElementById('add-pass').closest('.form-group').style.display = 'block';
-
-      // 编辑模式显示测试连接和删除按钮
-      document.getElementById('btn-delete-device').style.display = 'inline-block';
-      document.getElementById('btn-test-device').style.display = 'inline-block';
+      // 拓扑编辑仅改基础信息，不改连接方式
+      document.getElementById('add-type').closest('.form-group').style.display = 'none';
+      document.getElementById('net-fields').style.display = 'none';
+      document.getElementById('serial-fields').style.display = 'none';
+      document.getElementById('add-user').closest('.form-group').style.display = 'none';
+      document.getElementById('add-pass').closest('.form-group').style.display = 'none';
 
       openModal('modal-device');
     }
@@ -599,8 +240,6 @@
       return `<svg class="node-icon" viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#34d399" stroke-width="2"/><circle cx="8" cy="12" r="1.5" fill="#34d399"/><circle cx="12" cy="12" r="1.5" fill="#34d399"/><circle cx="16" cy="12" r="1.5" fill="#34d399"/></svg>`;
     }
 
-    let _clickMoved = false;
-
     function initTopologyInteractions() {
       const infinite = document.getElementById('topology-infinite');
       const nodeLayer = document.getElementById('topology-node-layer');
@@ -617,22 +256,17 @@
         if (node) {
           dragNodeId = node.dataset.id;
           dragStart = { x: e.clientX, y: e.clientY };
-          _clickMoved = false;
           e.preventDefault();
           return;
         }
         panning = true;
         dragStart = { x: e.clientX, y: e.clientY };
-        _clickMoved = false;
       });
 
       window.addEventListener('mousemove', (e) => {
         if (dragNodeId) {
           const n = (topologyState.nodes || []).find(x => x.id === dragNodeId);
           if (!n || !dragStart) return;
-          const dx = Math.abs(e.clientX - dragStart.x);
-          const dy = Math.abs(e.clientY - dragStart.y);
-          if (dx > 3 || dy > 3) _clickMoved = true;
           n.x += (e.clientX - dragStart.x) / view.scale;
           n.y += (e.clientY - dragStart.y) / view.scale;
           dragStart = { x: e.clientX, y: e.clientY };
@@ -640,9 +274,6 @@
           return;
         }
         if (panning && dragStart) {
-          const dx = Math.abs(e.clientX - dragStart.x);
-          const dy = Math.abs(e.clientY - dragStart.y);
-          if (dx > 3 || dy > 3) _clickMoved = true;
           view.x += (e.clientX - dragStart.x);
           view.y += (e.clientY - dragStart.y);
           dragStart = { x: e.clientX, y: e.clientY };
@@ -652,30 +283,10 @@
 
       window.addEventListener('mouseup', async () => {
         if (dragNodeId || panning) {
-          const wasClick = !_clickMoved;
-          const wasPanning = panning;
           dragNodeId = null;
           panning = false;
           dragStart = null;
-          _clickMoved = false;
-          // 点击空白区域（非拖拽）→ 取消所有选中
-          if (wasClick && wasPanning && selectedIds.size > 0) {
-            selectedIds.clear();
-            selectedId = null;
-            renderAll();
-          }
           await syncTopologyState();
-        }
-      });
-
-      // Esc 键取消选中
-      window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          if (selectedIds.size > 0) {
-            selectedIds.clear();
-            selectedId = null;
-            renderAll();
-          }
         }
       });
     }
@@ -692,34 +303,12 @@
         list.innerHTML = '<div style="color:#94a3b8;font-size:12px;">暂无设备</div>';
         return;
       }
-      // 按设备类型分组
-      const groups = {};
-      const typeLabels = {layer2_switch:'二层交换机',layer3_switch:'三层交换机',router:'路由器',firewall:'防火墙',unknown:'未分类'};
-      devices.forEach(d => {
-        const t = d.device_type || 'unknown';
-        if (!groups[t]) groups[t] = [];
-        groups[t].push(d);
-      });
-      let html = '';
-      Object.keys(groups).sort().forEach(type => {
-        const label = typeLabels[type] || type;
-        const count = groups[type].length;
-        html += `<div class="dev-group">
-          <div class="dev-group-header" onclick="this.parentElement.classList.toggle('open')">
-            <span class="dev-group-arrow">▶</span>
-            <span>${label}</span>
-            <span style="margin-left:auto;font-size:10px;color:#6b7280;">${count}</span>
-          </div>
-          <div class="dev-group-body">`;
-        groups[type].forEach(d => {
-          html += `<div class="device-item" onclick="openConnEditor('${d.id}')" title="点击编辑连接方式">
-            <div class="device-name">${d.remark || d.name}</div>
-            <div class="device-ip">${d.conn_type || 'ssh'}://${d.ip || d.serial_port || 'N/A'}${d.port ? ':' + d.port : ''}</div>
-          </div>`;
-        });
-        html += `</div></div>`;
-      });
-      list.innerHTML = html;
+      list.innerHTML = devices.map(d => `
+        <div class="device-item ${selectedId === d.id ? 'active' : ''}" onclick="openDeviceDetail('${d.id}')">
+          <div class="device-name">${d.remark || d.name}</div>
+          <div class="device-ip">${d.ip || d.serial_port || 'N/A'}</div>
+        </div>
+      `).join('');
     }
 
     function renderTopology() {
@@ -730,81 +319,18 @@
       const nodes = topologyState.nodes || [];
       const links = topologyState.links || [];
 
-      // 智能自动布局（力导向）——只对无坐标的节点布局，或全部重新布局
-      const needLayout = nodes.some(n => typeof n.x !== 'number' || typeof n.y !== 'number');
-      if (needLayout && nodes.length > 0 && links.length > 0) {
-        // 初始位置：按拓扑层级排列
-        // 找到连接数最多的节点放中间
-        const connCount = {};
-        links.forEach(l => { connCount[l.from] = (connCount[l.from]||0)+1; connCount[l.to] = (connCount[l.to]||0)+1; });
-        const center = nodes.reduce((a,b) => (connCount[b.id]||0) > (connCount[a.id]||0) ? b : a);
-        const cx = 400, cy = 250;
-        center.x = cx; center.y = cy;
-        // 其他节点按连线关系环形分布
-        const others = nodes.filter(n => n.id !== center.id);
-        const angleStep = (2 * Math.PI) / Math.max(others.length, 1);
-        const radius = Math.max(180, others.length * 60);
-        others.forEach((n, i) => {
-          const angle = angleStep * i - Math.PI / 2;
-          n.x = cx + radius * Math.cos(angle);
-          n.y = cy + radius * Math.sin(angle);
-        });
-        // 力导向迭代优化（简化版）
-        for (let iter = 0; iter < 60; iter++) {
-          const forces = nodes.map(() => ({fx:0, fy:0}));
-          // 节点间斥力
-          for (let i = 0; i < nodes.length; i++) {
-            for (let j = i+1; j < nodes.length; j++) {
-              let dx = nodes[j].x - nodes[i].x;
-              let dy = nodes[j].y - nodes[i].y;
-              let dist = Math.sqrt(dx*dx + dy*dy) || 1;
-              let repulse = 8000 / (dist * dist);
-              let ux = dx/dist, uy = dy/dist;
-              forces[i].fx -= ux * repulse;
-              forces[i].fy -= uy * repulse;
-              forces[j].fx += ux * repulse;
-              forces[j].fy += uy * repulse;
-            }
-          }
-          // 连线引力
-          links.forEach(l => {
-            const ai = nodes.findIndex(n => n.id === l.from);
-            const bi = nodes.findIndex(n => n.id === l.to);
-            if (ai < 0 || bi < 0) return;
-            let dx = nodes[bi].x - nodes[ai].x;
-            let dy = nodes[bi].y - nodes[ai].y;
-            let dist = Math.sqrt(dx*dx + dy*dy) || 1;
-            let attract = (dist - 220) * 0.05;
-            let ux = dx/dist, uy = dy/dist;
-            forces[ai].fx += ux * attract;
-            forces[ai].fy += uy * attract;
-            forces[bi].fx -= ux * attract;
-            forces[bi].fy -= uy * attract;
-          });
-          // 应用力
-          const damping = 0.6;
-          nodes.forEach((n, i) => {
-            n.x += forces[i].fx * damping;
-            n.y += forces[i].fy * damping;
-            // 限制在画布内
-            n.x = Math.max(40, Math.min(1200, n.x));
-            n.y = Math.max(40, Math.min(600, n.y));
-          });
+      // 无坐标的节点自动排列（网格布局）
+      let autoIdx = 0;
+      nodes.forEach((n) => {
+        if (typeof n.x !== 'number' || typeof n.y !== 'number') {
+          const cols = 4;
+          const row = Math.floor(autoIdx / cols);
+          const col = autoIdx % cols;
+          n.x = 40 + col * 200;
+          n.y = 40 + row * 140;
+          autoIdx++;
         }
-      } else if (needLayout && nodes.length > 0) {
-        // 没有链路时用网格布局
-        let autoIdx = 0;
-        nodes.forEach((n) => {
-          if (typeof n.x !== 'number' || typeof n.y !== 'number') {
-            const cols = 4;
-            const row = Math.floor(autoIdx / cols);
-            const col = autoIdx % cols;
-            n.x = 40 + col * 200;
-            n.y = 40 + row * 140;
-            autoIdx++;
-          }
-        });
-      }
+      });
 
       world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
 
@@ -822,23 +348,14 @@
           if (facts.up_interfaces) chips += `<span class="chip ok">UP:${facts.up_interfaces}</span>`;
           if (facts.trunk_ports?.length) chips += `<span class="chip warn">Trunk:${facts.trunk_ports.length}</span>`;
           chips += facts.last_collected ? `<span class="chip ok">● 在线</span>` : `<span class="chip" style="color:#6b7280;">○ 未采集</span>`;
-          const selCls = selectedIds.has(n.id) ? ' selected' : '';
           return `
-          <div class="topo-node ${cls}${selCls}" data-id="${n.id}" style="left:${n.x}px; top:${n.y}px;" onclick="openTopologyDeviceConfig('${n.id}', event)" title="${n.remark || n.name} | ${n.ip || 'N/A'}">
+          <div class="topo-node ${cls}" data-id="${n.id}" style="left:${n.x}px; top:${n.y}px;" onclick="openTopologyDeviceConfig('${n.id}')">
             <div class="topo-head">${iconSvg(t)}<div class="node-remark">${n.remark || n.name || '未命名设备'}</div></div>
+            <div class="node-ip">${n.ip || 'N/A'}</div>
             ${chips ? `<div class="node-chips">${chips}</div>` : ''}
           </div>
         `;
         }).join('');
-
-        // 同一对设备间的链路用同一种颜色
-        const colors = ['#22d3ee','#a78bfa','#f472b6','#fb923c','#4ade80','#facc15','#60a5fa','#f87171'];
-        const pairColors = {};
-        let colorIdx = 0;
-        links.forEach(l => {
-          const pk = [l.from, l.to].sort().join('::');
-          if (!(pk in pairColors)) { pairColors[pk] = colors[colorIdx % colors.length]; colorIdx++; }
-        });
 
         svg.innerHTML = links.map((l, idx) => {
           const a = nodes.find(n => n.id === l.from);
@@ -848,9 +365,13 @@
           const pairKey = [l.from, l.to].sort().join('::');
           const siblings = links.filter(x => [x.from, x.to].sort().join('::') === pairKey);
           const order = siblings.findIndex(x => x.id === l.id || x === l);
-          const offset = (order - (siblings.length - 1) / 2) * 14;
+          const offset = (order - (siblings.length - 1) / 2) * 12;
 
-          const color = pairColors[pairKey];
+          const x1 = a.x + 150, y1 = a.y + 32 + offset;
+          const x2 = b.x, y2 = b.y + 32 + offset;
+          const mid = (x1 + x2) / 2;
+          const cls = `topo-edge`;
+          const path = `M ${x1} ${y1} L ${mid} ${y1} L ${mid} ${y2} L ${x2} ${y2}`;
           const shortPort = (p) => {
             const s = (p || '?').trim();
             return s
@@ -860,47 +381,12 @@
               .replace(/^HundredGigE/i, '100GE')
               .replace(/^Ethernet/i, 'Eth');
           };
-          const lp = shortPort(l.from_port);
-          const rp = shortPort(l.to_port);
-
-          // Node centers
-          const acx = a.x + 60, acy = a.y + 16;
-          const bcx = b.x + 60, bcy = b.y + 16;
-          // Direction unit vector
-          const dx = bcx - acx, dy = bcy - acy;
-          const len = Math.sqrt(dx*dx + dy*dy) || 1;
-          const ux = dx/len, uy = dy/len;
-          // Perpendicular for offset
-          const px = -uy * offset, py = ux * offset;
-          // 计算线和节点矩形的交点（节点 120×32，中心偏移 hw=60, hh=19）
-          const hw = 60, hh = 19;
-          function edgeDist(ux, uy, hw, hh) {
-            // 从中心沿 (ux,uy) 方向到矩形边的距离
-            const dx = Math.abs(ux) > 0.001 ? hw / Math.abs(ux) : 9999;
-            const dy = Math.abs(uy) > 0.001 ? hh / Math.abs(uy) : 9999;
-            return Math.min(dx, dy) + 2; // +2 留一点间距
-          }
-          const rA = edgeDist(ux, uy, hw, hh);
-          const rB = edgeDist(-ux, -uy, hw, hh);
-          const x1 = acx + ux*rA + px, y1 = acy + uy*rA + py;
-          const x2 = bcx + (-ux)*rB + px, y2 = bcy + (-uy)*rB + py;
-          const mx = (x1+x2)/2, my = (y1+y2)/2;
-
-          // 端口标签：沿线垂直方向偏移，贴在线段上
-          const lineOff = (order - (siblings.length - 1) / 2) * 16;
-          // from 端：线段 22% 处 + 垂直偏移
-          const tag1x = x1 + (x2-x1)*0.22 + (-uy)*lineOff;
-          const tag1y = y1 + (y2-y1)*0.22 + (ux)*lineOff;
-          // to 端：线段 78% 处 + 垂直偏移
-          const tag2x = x1 + (x2-x1)*0.78 + (-uy)*lineOff;
-          const tag2y = y1 + (y2-y1)*0.78 + (ux)*lineOff;
-
-          return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="2" stroke-linecap="round" opacity="0.8"/>
-                  <rect x="${tag1x-17}" y="${tag1y-9}" width="35" height="13" rx="2" fill="rgba(6,15,27,0.92)" stroke="${color}" stroke-width="0.5"/>
-                  <text x="${tag1x}" y="${tag1y}" fill="${color}" font-size="9" font-family="monospace" text-anchor="middle" font-weight="600">${lp}</text>
-                  <rect x="${tag2x-17}" y="${tag2y-9}" width="35" height="13" rx="2" fill="rgba(6,15,27,0.92)" stroke="${color}" stroke-width="0.5"/>
-                  <text x="${tag2x}" y="${tag2y}" fill="${color}" font-size="9" font-family="monospace" text-anchor="middle" font-weight="600">${rp}</text>
-                  <circle cx="${mx}" cy="${my}" r="3" fill="${color}"/>`;
+          const leftPort = shortPort(l.from_port);
+          const rightPort = shortPort(l.to_port);
+          const cy = (y1 + y2) / 2;
+          return `<path class="${cls}" d="${path}" />
+                  <text class="port-label" x="${x1 + 8}" y="${y1 - 6}">${leftPort}</text>
+                  <text class="port-label right" x="${x2 - 8}" y="${y2 - 6}">${rightPort}</text>`;
         }).join('');
       }
 
@@ -943,8 +429,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      let d;
-      try { d = await r.json(); } catch(e) { alert('保存失败：服务器错误'); return; }
+      const d = await r.json();
       if (!d.success) { alert(d.message || '保存失败'); return; }
 
       closeModal('modal-device');
@@ -1031,112 +516,69 @@
       addMsg('system', 'LLM 配置已保存');
     }
 
-    let _chatAbort = null;
-    let _chatBusy = false;
-
-    function stopChat() {
-      if (_chatAbort) { _chatAbort.abort(); _chatAbort = null; }
-      _chatBusy = false;
-      document.getElementById('btn-stop').style.display = 'none';
-      document.getElementById('btn-send').style.display = '';
-      addMsg('system', '⏹ 已停止');
-    }
-
     async function sendChat() {
-      if (_chatBusy) return;
       const input = document.getElementById('chat-input');
       const msg = input.value.trim();
       if (!msg) return;
       addMsg('user', msg);
       input.value = '';
-      _chatBusy = true;
-      _chatAbort = new AbortController();
-      document.getElementById('btn-stop').style.display = '';
-      document.getElementById('btn-send').style.display = 'none';
-      
-      // 从拓扑多选中获取目标设备
-      const selected = Array.from(selectedIds).map(id => devices.find(d => d.id === id)).filter(Boolean);
-      let context = {};
-      if (selected.length > 1) {
-        context.selected_devices = selected.map(d => d.remark || d.name);
-        context.selected_device = selected.map(d => d.remark || d.name).join('、');
-      } else if (selected.length === 1) {
-        context.selected_device = selected[0].name || selected[0].remark;
-      } else {
-        const d = devices.find(x => x.id === selectedId);
-        if (d) context.selected_device = d.name || d.remark;
-      }
-      
-      // 思考中占位
-      const thinkingHtml = '<div class="chat-msg ai" id="thinking-placeholder"><span style="color:#67e8f9">⏳ 思考中...</span></div>';
-      document.getElementById('chat-messages').insertAdjacentHTML('beforeend', thinkingHtml);
-      
-      try {
-        const r = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: msg, context }),
-          signal: _chatAbort.signal
-        });
-        const res = await r.json();
-        const tp = document.getElementById('thinking-placeholder');
-        if (tp) tp.remove();
-        addMsg('ai', (res.executed ? '✅ ' : '') + (res.response || '无响应'));
-      } catch (e) {
-        const tp = document.getElementById('thinking-placeholder');
-        if (tp) tp.remove();
-        if (e.name === 'AbortError') {
-          addMsg('system', '⏹ 已停止');
-        } else {
-          addMsg('ai', '❌ 请求失败');
-        }
-      } finally {
-        _chatBusy = false;
-        _chatAbort = null;
-        document.getElementById('btn-stop').style.display = 'none';
-        document.getElementById('btn-send').style.display = '';
-      }
+      const d = devices.find(x => x.id === selectedId);
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg, context: { selected_device: d?.name || d?.remark } })
+      });
+      const res = await r.json();
+      addMsg('ai', (res.executed ? '✅ ' : '') + (res.response || '无响应'));
     }
 
     // ===== 设备详情弹窗 =====
-    // 左侧设备点击 → 编辑连接方式
-    function openConnEditor(id) {
-      // 左侧设备点击 → 编辑连接方式（SSH/Telnet）
-      openDeviceEditor(id);
+    function openDeviceDetail(id) {
+      selectedId = id;
+      renderAll();
+      const d = devices.find(x => x.id === id);
+      if (!d) return;
+      document.getElementById('detail-modal-title').textContent = d.remark || d.name;
+      const box = document.getElementById('detail-content');
+      const fields = [
+        ['名称',d.name],['备注',d.remark||'-'],['IP',d.ip||'-'],['端口',d.port||d.serial_port||'-'],
+        ['连接方式',d.conn_type||'-'],['厂商',d.vendor||'-'],['型号',d.model||'-'],['版本',d.os_version||'-'],['用户名',d.username||'-']
+      ];
+      let html = fields.map(f => `<div class="detail-row"><div class="detail-key">${f[0]}</div><div class="detail-val">${f[1]}</div></div>`).join('');
+      const facts = d.facts||{};
+      if (facts.last_collected) {
+        html += '<div style="margin-top:8px;font-size:11px;color:#6b7280;">状态信息</div>';
+        [['VLAN数',facts.vlan_count],['UP接口',facts.up_interfaces],['总接口',facts.total_interfaces],['Trunk端口',(facts.trunk_ports||[]).join(', ')],['最后采集',facts.last_collected]].forEach(f => html += `<div class="detail-row"><div class="detail-key">${f[0]}</div><div class="detail-val">${f[1]||'-'}</div></div>`);
+      }
+      box.innerHTML = html;
+      document.getElementById('btn-test-detail').onclick = async () => {
+        const dd = devices.find(x => x.id === id);
+        if (!dd) return;
+        closeModal('modal-device-detail');
+        addMsg('system', `测试连接 ${dd.remark || dd.name}...`);
+        const r = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:`测试设备 ${dd.remark||dd.name} 的连通性`,context:{selected_device:dd.name||dd.remark}})});
+        const res = await r.json();
+        addMsg('ai', (res.success?'✅ ':'❌ ')+(res.response||res.message||''));
+      };
+      document.getElementById('btn-conn-edit-detail').onclick = () => { closeModal('modal-device-detail'); openDeviceEditor(d.id); };
+      document.getElementById('btn-delete-detail').onclick = async () => {
+        if (!confirm('确认删除设备?')) return;
+        closeModal('modal-device-detail');
+        const r = await fetch('/api/device/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:d.id})});
+        const res = await r.json();
+        if (res.success) { selectedId=null; await loadDevices(); buildTopologyFromDevices(); await syncTopologyState(); renderAll(); addMsg('system','✅ 已删除'); }
+        else addMsg('system','❌ '+res.message);
+      };
+      openModal('modal-device-detail');
     }
 
     // ===== 配置中心（拓扑节点点击弹出） =====
 
-    function openTopologyDeviceConfig(id, evt) {
-      // 如果刚拖拽过，忽略点击
-      if (_clickMoved) return;
-      const isCtrl = evt && (evt.ctrlKey || evt.metaKey);
-      if (isCtrl) {
-        // Ctrl+点击：多选切换
-        if (selectedIds.has(id)) selectedIds.delete(id);
-        else selectedIds.add(id);
-        selectedId = selectedIds.size > 0 ? Array.from(selectedIds).pop() : id;
-        renderAll();
-        updateSelectionInfo();
-      } else {
-        // 普通点击：单选 + 弹配置中心
-        selectedIds.clear();
-        selectedIds.add(id);
-        selectedId = id;
-        renderAll();
-        renderConfigPanel();
-        openModal('modal-config');
-      }
-    }
-
-    function updateSelectionInfo() {
-      const names = Array.from(selectedIds).map(id => {
-        const d = devices.find(x => x.id === id);
-        return d ? (d.remark || d.name) : '';
-      }).filter(Boolean);
-      if (names.length > 1) {
-        addMsg('system', `已选中 ${names.length} 台设备：${names.join('、')}`);
-      }
+    function openTopologyDeviceConfig(id) {
+      selectedId = id;
+      renderAll();
+      renderConfigPanel();
+      openModal('modal-config');
     }
 
     let _cfgTab = '查看';
@@ -1158,12 +600,10 @@
       const vendorMap = {huawei:'华为',h3c:'H3C',cisco:'思科',ruijie:'锐捷',juniper:'Juniper'};
       const tl = typeMap[dtype]||dtype; const vl = vendorMap[(d.vendor||'').toLowerCase()]||d.vendor||'未知';
 
-      let thtml = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      let thtml = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <span style="color:#67e8f9;font-size:14px;font-weight:700;">${_cfgDevice}</span>
         <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#1e293b;color:#94a3b8;">${tl} · ${vl}</span>
       </div>`;
-      // 设备信息行
-      thtml += `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">IP: ${d.ip||'-'} | 连接: ${d.conn_type||'-'} | 型号: ${d.model||'-'}</div>`;
       if(facts.last_collected){
         thtml+=`<div style="font-size:11px;color:#6b7280;margin-bottom:6px;">`;
         if(facts.vlan_count) thtml+=`VLAN:${facts.vlan_count} `;
@@ -1183,7 +623,6 @@
       tabs.forEach(t => {
         thtml += `<button class="cfg-tab${_cfgTab===t.k?' active':''}" data-tab="${t.k}" onclick="switchCfgTab('${t.k}')">${t.l}</button>`;
       });
-      thtml += `</div>`;
       thtml += `</div>`;
       thtml += `<div id="cfg-tab-content"></div>`;
 
@@ -1630,11 +1069,13 @@
       if(sec > 0) {
         _topoTimer = setInterval(async () => {
           try {
-            // 自动刷新只同步状态，不跑发现
-            const r = await fetch('/api/topology/state');
+            const r = await fetch('/api/topology/discover', { method: 'POST' });
             const d = await r.json();
-            if (d.state) {
-              topologyState = d.state;
+            if (d.success) {
+              topologyState = d.state || topologyState;
+              await loadDevices();
+              buildTopologyFromDevices();
+              await syncTopologyState();
               renderAll();
             }
           } catch(e) {}
@@ -1642,37 +1083,4 @@
       }
     }
     function stopTopoRefresh() { if(_topoTimer){clearInterval(_topoTimer);_topoTimer=null;} }
-
-    async function testCurrentDevice() {
-      const d = devices.find(x => x.id === editingDeviceId);
-      if (!d) return;
-      const btn = document.getElementById('btn-test-device');
-      btn.textContent = '测试中...'; btn.disabled = true;
-      try {
-        const r = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'测试连通性',context:{selected_device:d.name||d.remark}})});
-        const res = await r.json();
-        addMsg('ai', (res.success?'✅ ':'❌ ')+(res.response||res.message||''));
-      } catch(e) { addMsg('ai','❌ 请求失败'); }
-      btn.textContent = '测试连接'; btn.disabled = false;
-    }
-
-    async function deleteCurrentDevice() {
-      if (!confirm('确认删除该设备？')) return;
-      const r = await fetch('/api/device/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:editingDeviceId})});
-      const res = await r.json();
-      if (res.success) {
-        closeModal('modal-device');
-        selectedId = null;
-        editingDeviceId = null;
-        await loadDevices();
-        buildTopologyFromDevices();
-        await syncTopologyState();
-        renderAll();
-        addMsg('system','✅ 设备已删除');
-      } else {
-        alert(res.message||'删除失败');
-      }
-    }
-  </script>
-</body>
-</html>
+   } catch(e) { print(e.message); }

@@ -306,38 +306,49 @@ def topology_discover():
         PORT_RE = r'(?:GigabitEthernet|Ten-GigabitEthernet|FortyGigE|HundredGigE|XGE|10GE|40GE|100GE|Ethernet|Eth|GE|Port-channel|Vlanif|LoopBack|NULL|Vlan|Bridge-Aggregation|Route-Aggregation)\d+(?:/\d+)*(?:\.\d+)?'
         
         all_lldp_text = ''
-        device_lldp = {}  # 每台设备的原始 LLDP 文本
+        device_lldp = {}
+        # 直接用 netmiko 采集 LLDP，不走 LLM（速度从 2 分钟降到 30 秒）
+        from netops_tools import NetOpsTools
+        tools = NetOpsTools()
         for d in devices:
             dev_name = d.get('remark') or d.get('name')
-            dtype = (d.get('device_type') or '').lower()
-            vendor = (d.get('vendor') or '').lower()
-            
-            # 跳过没有IP和连接方式的设备
+            dev_id = d.get('id')
+            conn_type = d.get('conn_type', 'ssh')
             if not d.get('ip') and not d.get('serial_port'):
-                device_lldp[dev_name] = f'设备 {dev_name} 无连接地址，跳过'
-                all_lldp_text += f'\n=== {dev_name} ===\n（无连接地址，跳过）\n'
+                device_lldp[dev_name] = ''
                 continue
-            
-            # 统一用 LLDP 发现，如果没开就自动启用
-            discover_cmd = f"""在 {dev_name} 上发现 LLDP 邻居，按以下步骤执行：
-1. 先执行 display lldp neighbor-information list 查看邻居
-2. 如果返回"LLDP is not configured"或"LLDP未启用"之类的提示，说明 LLDP 没开，则执行以下命令启用 LLDP：
-   - system-view
-   - lldp enable
-   - quit
-   然后再执行 display lldp neighbor-information list
-3. 如果 LLDP 已启用但没邻居，执行 display lldp neighbor-information verbose
-4. 显示所有命令的完整输出，不要省略任何端口信息。"""
-
-            chat_result = _do_chat(
-                discover_cmd,
-                dev_name
-            )
-            raw = chat_result.get("tool_outputs", "") + "\n" + chat_result.get("response", "")
-            device_lldp[dev_name] = raw
-            all_lldp_text += f'\n=== {dev_name} ===\n{raw}\n'
-            # 给方法3用
-            _last_chat_result = chat_result
+            try:
+                raw_cmd = "display lldp neighbor-information list"
+                if conn_type == 'telnet':
+                    r = tools._telnet_connect(dev_name, [raw_cmd])
+                else:
+                    r = tools._ssh_connect(dev_name, [raw_cmd])
+                if r.get('success'):
+                    raw = r.get('results', [{}])[0].get('output', '')
+                    # 如果 LLDP 未启用，尝试启用后重试
+                    if 'not configured' in raw.lower() or '未启用' in raw:
+                        for cmd in ['lldp enable', 'lldp global enable']:
+                            if conn_type == 'telnet':
+                                r2 = tools._telnet_connect(dev_name, [cmd])
+                            else:
+                                r2 = tools._ssh_connect(dev_name, [cmd])
+                            if r2.get('success'):
+                                out2 = r2.get('results', [{}])[0].get('output', '')
+                                if 'unrecognized' not in out2.lower() and 'wrong' not in out2.lower():
+                                    # 启用成功，重试查询
+                                    if conn_type == 'telnet':
+                                        r3 = tools._telnet_connect(dev_name, [raw_cmd])
+                                    else:
+                                        r3 = tools._ssh_connect(dev_name, [raw_cmd])
+                                    if r3.get('success'):
+                                        raw = r3.get('results', [{}])[0].get('output', '')
+                                    break
+                    device_lldp[dev_name] = raw
+                    all_lldp_text += f'\n=== {dev_name} ===\n{raw}\n'
+                else:
+                    device_lldp[dev_name] = f'连接失败: {r.get("error","")}'
+            except Exception as e:
+                device_lldp[dev_name] = f'异常: {e}'
         
         # 按段落解析 LLDP 输出，提取 本地端口→对端端口→对端设备名
         links = []
