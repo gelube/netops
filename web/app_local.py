@@ -1,7 +1,8 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """NetOps AI Web - LLM Function Calling with SSH/Telnet Tools"""
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, make_response
 import json, os, sys
+import requests as _requests_lib
 sys.path.insert(0, r'Z:\netops-ai')
 from app.llm.config import LLMConfig
 from netops_tools import NetOpsTools, get_tools_definition
@@ -15,7 +16,11 @@ tools = NetOpsTools(DEVICES_FILE)
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    resp = make_response(render_template('index.html'))
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 # ===== LLM 配置 =====
 @app.route('/api/llm/config', methods=['POST', 'GET'])
@@ -25,32 +30,32 @@ def handle_llm_config():
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 return jsonify(json.load(f))
         return jsonify({})
-    
+
     try:
         data = request.json or {}
-        
+
         def clean(s):
             return str(s or '').replace('<', '').replace('>', '').strip()
-        
+
         provider = clean(data.get('provider', 'openai'))
         endpoint = clean(data.get('endpoint', ''))
         api_key = clean(data.get('api_key', ''))
         model = clean(data.get('model', ''))
-        
+
         if endpoint and not endpoint.startswith(('http://', 'https://')):
             endpoint = 'http://' + endpoint
         endpoint = endpoint.rstrip('/')
-        
+
         if not endpoint:
             return jsonify({'success': False, 'message': 'API Endpoint 不能为空'}), 400
-        
+
         llm_config = LLMConfig(provider=provider, endpoint=endpoint, api_key=api_key, model=model)
         llm_config.save()
-        
+
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump({'provider': provider, 'endpoint': endpoint, 'api_key': api_key, 'model': model}, f, indent=2, ensure_ascii=False)
-        
+
         return jsonify({'success': True, 'provider': provider, 'endpoint': endpoint, 'model': model})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -61,25 +66,25 @@ def test_llm():
         data = request.json or {}
         endpoint = str(data.get('endpoint', '')).strip()
         api_key = str(data.get('api_key', '')).strip()
-        
+
         if not endpoint:
             return jsonify({'success': False, 'message': '请填写 API Endpoint'})
-        
+
         import requests
-        
+
         base = endpoint.rstrip('/')
         if '/v1' not in base:
             base = base + '/v1'
-        
+
         headers = {}
         if api_key:
             headers['Authorization'] = f'Bearer {api_key}'
-        
+
         try:
             resp = requests.get(f'{base}/models', headers=headers, timeout=10)
         except requests.exceptions.ConnectionError:
             return jsonify({'success': False, 'message': '无法连接，请检查服务是否运行'})
-        
+
         if resp.status_code == 200:
             models_data = resp.json()
             models = [m.get('id', str(m)) for m in models_data.get('data', []) if isinstance(m, dict)]
@@ -293,18 +298,15 @@ def ensure_lldp_on_all_devices(devices):
 
 @app.route('/api/topology/discover', methods=['POST'])
 def topology_discover():
-    """拓扑发现：先确保 LLDP 启用，再 LLM 执行命令提取链路"""
+    """拓扑发现：直接用 netmiko 采集 LLDP 并解析链路（一次连接搞定）"""
     try:
         import re as _re
         devices = load_devices()
         state = load_topology_state()
         old_nodes = state.get('nodes', [])
-        
-        # 先确保所有设备 LLDP 已启用
-        ensure_lldp_on_all_devices(devices)
-        
+
         PORT_RE = r'(?:GigabitEthernet|Ten-GigabitEthernet|FortyGigE|HundredGigE|XGE|10GE|40GE|100GE|Ethernet|Eth|GE|Port-channel|Vlanif|LoopBack|NULL|Vlan|Bridge-Aggregation|Route-Aggregation)\d+(?:/\d+)*(?:\.\d+)?'
-        
+
         all_lldp_text = ''
         device_lldp = {}
         # 直接用 netmiko 采集 LLDP，不走 LLM（速度从 2 分钟降到 30 秒）
@@ -349,14 +351,14 @@ def topology_discover():
                     device_lldp[dev_name] = f'连接失败: {r.get("error","")}'
             except Exception as e:
                 device_lldp[dev_name] = f'异常: {e}'
-        
+
         # 按段落解析 LLDP 输出，提取 本地端口→对端端口→对端设备名
         links = []
         for d in devices:
             dev_name = d.get('remark') or d.get('name')
             dev_id = d.get('id')
             raw = device_lldp.get(dev_name, '')
-            
+
             # 方法1：LLDP neighbor list 格式（有邻居名称）
             # 例: GE1/0/1    核心交换机    GE1/0/1
             list_pattern = _re.compile(
@@ -374,14 +376,26 @@ def topology_discover():
                             if on == neighbor_name or neighbor_name in on or on in neighbor_name:
                                 tid = other.get('id')
                                 break
-                    # 如果 System Name 是通用名（如 H3C），用端口交叉验证
-                    if not tid and neighbor_name.upper() in ('H3C','HUAWEI','CISCO','SWITCH','ROUTER'):
+                    # 如果 System Name 是通用名或匹配不到，用端口交叉验证
+                    if not tid:
+                        import re as _re2
+                        def norm_port(p):
+                            """标准化端口名: GigabitEthernet1/0/1 -> GE1/0/1"""
+                            return _re2.sub(r'GigabitEthernet', 'GE',
+                                   _re2.sub(r'Ten-GigabitEthernet', 'XGE',
+                                   _re2.sub(r'HundredGigE', 'HGE', p)))
+
                         for other in devices:
                             if other.get('id') != dev_id:
                                 other_raw = device_lldp.get(other.get('remark') or other.get('name'), '')
-                                # 检查对端设备的 LLDP 输出是否包含本设备的端口
-                                if remote_p in other_raw and local_p in other_raw:
-                                    tid = other.get('id')
+                                if other_raw:
+                                    other_matches = list_pattern.findall(other_raw)
+                                    for op_local, op_neighbor, op_remote in other_matches:
+                                        if (norm_port(op_local.strip()) == norm_port(remote_p.strip()) and
+                                            norm_port(op_remote.strip()) == norm_port(local_p.strip())):
+                                            tid = other.get('id')
+                                            break
+                                if tid:
                                     break
                     # 最终兜底：只有两台设备时直接连
                     if not tid:
@@ -399,7 +413,7 @@ def topology_discover():
                 # 如果方法1部分匹配失败，不 continue，让后续方法补全
                 if not any(l['from_name'] == dev_name for l in links):
                     pass  # 继续到方法2
-            
+
             # 方法2：按段落解析 verbose 格式（port N[本地端口] → PortID → 对端端口）
             # 每个 "neighbor-information of port" 块是一个邻居
             blocks = _re.split(r'LLDP neighbor-information of port', raw)
@@ -410,12 +424,12 @@ def topology_discover():
                 sysname_m = _re.search(r'System Name\s*:\s*(\S+)', block, _re.IGNORECASE)
                 # 尝试提取 ChassisID (MAC)
                 chassis_m = _re.search(r'ChassisID/subtype\s*:\s*([0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})', block)
-                
+
                 if not local_m:
                     continue
                 local_p = local_m.group(1)
                 remote_p = remote_m.group(1) if remote_m else 'unknown'
-                
+
                 # 匹配对端设备
                 tid = None
                 if sysname_m:
@@ -426,18 +440,18 @@ def topology_discover():
                             if target_name in on or on in target_name:
                                 tid = other.get('id')
                                 break
-                
+
                 if not tid:
-                    # 如果没有 System Name，不猜设备——跳过这个邻居
+                    # 如果没有 System Name，不猜设备--跳过这个邻居
                     # 避免笛卡尔积产生假链路
                     continue
-                
+
                 links.append({
                     'from_name': dev_name, 'from_port': local_p,
                     'to_name': next((x.get('remark') or x.get('name') for x in devices if x.get('id')==tid), ''),
                     'to_port': remote_p
                 })
-            
+
             # 方法3：从 LLM 回复文本中提取（最灵活的 fallback）
             # LLM 可能已经从 LLDP 输出推断出了邻居关系
             if not any(l['from_name'] == dev_name for l in links):
@@ -452,8 +466,8 @@ def topology_discover():
                     tid = next((x.get('id') for x in devices if x.get('remark')==to_n or x.get('name')==to_n), None)
                     if fid and tid:
                         links.append({'from_name': from_n, 'from_port': from_p, 'to_name': to_n, 'to_port': to_p})
-            
-            # 方法4：单向 fallback — A 有本地端口P1+对端端口P2，匹配 B 的接口名
+
+            # 方法4：单向 fallback - A 有本地端口P1+对端端口P2，匹配 B 的接口名
             # 如果 B 的某个接口名 == A 的对端端口，假设它们直连
             if not any(l['from_name'] == dev_name for l in links):
                 my_blocks = _re.split(r'LLDP neighbor-information of port', raw)
@@ -481,8 +495,8 @@ def topology_discover():
                                     'to_port': remote_p
                                 })
                                 break
-        
-        # 方法5：LLM 总结 fallback — 如果正则没提取到完整链路，让 LLM 直接分析
+
+        # 方法5：LLM 总结 fallback - 如果正则没提取到完整链路，让 LLM 直接分析
         # 包括 System Name 和设备备注不匹配的情况
         if len(links) < len(devices):
             device_details = []
@@ -491,13 +505,13 @@ def topology_discover():
                 dtype = d.get('device_type', 'unknown')
                 dip = d.get('ip', 'N/A')
                 device_details.append(f"- {dn} (ID: {d.get('id')}, 类型: {dtype}, IP: {dip})")
-            
+
             existing_desc = ""
             if links:
                 existing_desc = "已发现的链路（请保留这些）:\n" + "\n".join(
                     f"  {l['from_name']} {l['from_port']} -> {l['to_name']} {l['to_port']}" for l in links
                 ) + "\n\n请在此基础上补充遗漏的链路。"
-            
+
             summary_prompt = f"""根据以下各设备的 LLDP 邻居信息，推断设备之间的物理连接关系。
 
 设备列表（备注名 → 设备标识）:
@@ -516,7 +530,7 @@ def topology_discover():
 
 请直接返回完整的 JSON 数组，每个元素包含 from_name（用备注名）, from_port, to_name（用备注名）, to_port。
 示例: [{{"from_name":"接入交换机","from_port":"GE1/0/1","to_name":"核心交换机","to_port":"GE1/0/1"}}]"""
-            
+
             try:
                 llm_result = _do_chat(summary_prompt, None)
                 llm_text = llm_result.get("response", "")
@@ -538,35 +552,75 @@ def topology_discover():
             except Exception as ex:
                 import sys as _sys
                 _sys.stderr.write(f'LLM fallback error: {ex}\n')
-        
+
+        def norm_port(p):
+            import re as _re2
+            return _re2.sub(r'GigabitEthernet', 'GE', _re2.sub(r'Ten-GigabitEthernet', 'XGE', _re2.sub(r'HundredGigE', 'HGE', p)))
+
         port_pairs = {}
         for l in links:
             fid = next((x.get('id') for x in devices if x.get('remark')==l['from_name'] or x.get('name')==l['from_name']), None)
             tid = next((x.get('id') for x in devices if x.get('remark')==l['to_name'] or x.get('name')==l['to_name']), None)
             if not fid or not tid: continue
+            # 标准化端口名
+            fp = norm_port(l['from_port'])
+            tp = norm_port(l['to_port'])
             if fid > tid:
                 fid, tid = tid, fid
                 l['from_name'], l['to_name'] = l['to_name'], l['from_name']
-                l['from_port'], l['to_port'] = l['to_port'], l['from_port']
-            key = (fid, tid, l['from_port'], l['to_port'])
+                fp, tp = tp, fp
+            key = (fid, tid, fp, tp)
             if key not in port_pairs:
-                port_pairs[key] = {'from': fid, 'to': tid, 'id': f'link_{len(port_pairs)+1}', 'from_name': l['from_name'], 'to_name': l['to_name'], 'from_port': l['from_port'], 'to_port': l['to_port'], 'link_type': 'unknown', 'protocol': 'lldp'}
-        
+                port_pairs[key] = {'from': fid, 'to': tid, 'id': f'link_{len(port_pairs)+1}', 'from_name': l['from_name'], 'to_name': l['to_name'], 'from_port': fp, 'to_port': tp, 'link_type': 'unknown', 'protocol': 'lldp'}
+
         uniq = list(port_pairs.values())
         state['nodes'] = []
         for d in devices:
             old = next((n for n in old_nodes if n.get('id') == d.get('id')), {})
-            state['nodes'].append({'id': d.get('id'), 'name': d.get('name'), 'remark': d.get('remark', ''), 'ip': d.get('ip') or d.get('serial_port') or 'N/A', 'deviceType': d.get('device_type', 'unknown'), 'x': old.get('x'), 'y': old.get('y')})
-        
+            state['nodes'].append({'id': d.get('id'), 'name': d.get('name'), 'remark': d.get('remark', ''), 'ip': d.get('ip') or d.get('serial_port') or 'N/A', 'deviceType': d.get('device_type', 'unknown'), 'x': old.get('x'), 'y': old.get('y'), 'facts': d.get('facts')})
+
         state['links'] = uniq
         state['version'] = int(state.get('version', 1)) + 1
         save_topology_state(state)
-        
+
         with open(r'Z:\netops-ai\web\data\_discover_debug.txt', 'w', encoding='utf-8') as f:
             f.write(f'Links: {len(uniq)}\n')
             for l in uniq: f.write(f"  {l['from_name']} {l['from_port']} -> {l['to_name']} {l['to_port']}\n")
             f.write(f'\nRaw LLDP:\n{all_lldp_text[:3000]}\n')
-        
+
+        # 后台自动采集设备 facts（不阻塞返回）
+        import threading
+        def bg_collect():
+            try:
+                devs = load_devices()
+                for d in devs:
+                    dev_name = d.get('remark') or d.get('name')
+                    conn_type = d.get('conn_type', 'ssh')
+                    if not dev_name or not d.get('ip'): continue
+                    try:
+                        _cmds = ['display vlan brief', 'display interface brief']
+                        _tool = 'telnet_connect' if conn_type == 'telnet' else 'ssh_connect'
+                        _r = tools.execute_tool(_tool, {'device': dev_name, 'commands': _cmds})
+                        if _r.get('success'):
+                            _out = '\n'.join(x.get('output','') for x in _r.get('results',[]))
+                            import re as _re2
+                            _facts = {'last_collected': __import__('datetime').datetime.now().isoformat()}
+                            _vi = set()
+                            for _m in _re2.finditer(r'(?:VLAN|vlan)\s+(?:ID\s+)?(\d+)', _out):
+                                _vid = int(_m.group(1))
+                                if 1 <= _vid <= 4094: _vi.add(_vid)
+                            _facts['vlan_count'] = len(_vi)
+                            _u = 0; _t = 0
+                            for _m in _re2.finditer(r'((?:GE|GigabitEthernet|Eth|Ethernet|XGE|FGE|Po)[\d/]+)\(([UD])\)', _out, _re2.IGNORECASE):
+                                _t += 1
+                                if _m.group(2).upper() == 'U': _u += 1
+                            _facts['up_interfaces'] = _u; _facts['total_interfaces'] = _t
+                            d['facts'] = _facts
+                    except: pass
+                save_devices(devs)
+            except: pass
+        threading.Thread(target=bg_collect, daemon=True).start()
+
         return jsonify({'success': True, 'state': state, 'discovered_links': len(uniq)})
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -585,7 +639,7 @@ def _do_chat(message, selected_device):
         model = config.get('model', '')
         if not endpoint or not model:
             return {'success': False, 'message': 'LLM 未配置'}
-        
+
         import requests as http_req
         headers = {'Content-Type': 'application/json'}
         if api_key:
@@ -593,72 +647,81 @@ def _do_chat(message, selected_device):
         base = endpoint.rstrip('/')
         if '/v1' not in base:
             base += '/v1'
-        
+
         devices = load_devices()
         device_info = "\n".join([
             f"- 备注名: {d.get('remark') or d['name']}, IP: {d.get('ip')}:{d.get('port',23)}, 连接: {d.get('conn_type','ssh')}, 厂商: {d.get('vendor','unknown')}, 型号: {d.get('model','unknown')}, 设备类型: {d.get('device_type','unknown')}"
+            + (f", VLAN数: {d.get('facts',{}).get('vlan_count','?')}, UP接口: {d.get('facts',{}).get('up_interfaces','?')}/{d.get('facts',{}).get('total_interfaces','?')}" if d.get('facts',{}).get('last_collected') else "")
             for d in devices
         ])
-        
-        system_prompt = f"""你是 NetOps AI 网络工程师助手。你可以直接操作网络设备。
+
+        # 拓扑连接信息
+        topo_links = ""
+        try:
+            with open(TOPO_FILE, 'r', encoding='utf-8') as tf:
+                topo = json.load(tf)
+            links = topo.get('links', [])
+            if links:
+                link_lines = []
+                for lk in links:
+                    fn = lk.get('from_name','') or lk.get('from','')
+                    tn = lk.get('to_name','') or lk.get('to','')
+                    fp = lk.get('from_port','')
+                    tp = lk.get('to_port','')
+                    link_lines.append(f"  {fn} ({fp}) ←→ {tn} ({tp})")
+                topo_links = "\n".join(link_lines)
+        except:
+            topo_links = "（暂无拓扑数据，请先执行拓扑发现）"
+
+        system_prompt = f"""你是 NetOps AI 网络工程师助手，精通华为/H3C/思科网络设备配置。
 
 【设备列表】:
 {device_info}
 
-【重要规则】：
-1. 根据设备厂商选择正确的命令（华为/H3C 用 display，思科用 show）
-2. 你必须调用工具执行操作
-3. 返回结果时严格按要求格式输出
-4. H3C/华为设备启用 LLDP：
-   - 交换机（S系列）：在系统视图下执行 lldp enable
-   - 路由器（MSR/VSR系列）：在系统视图下执行 lldp global enable
-   - 区分方法：设备类型包含 router 或型号包含 MSR/VSR 的用 lldp global enable
-5. 如果设备卡在"Automatic configuration is running"，先发送 Ctrl+C 退出再执行命令"""
-        
+【拓扑连接】:
+{topo_links}
+
+【关键规则 - 必须遵守】:
+1. **不要手动写 system-view / conf t** — 系统会自动进入配置模式，你只需写出具体的配置命令本身
+   - ❌ 错误: ["system-view", "interface GE1/0/1", "port link-type trunk"]
+   - ✅ 正确: ["interface GigabitEthernet1/0/1", "port link-type trunk", "port trunk permit vlan all"]
+2. **不要写 return / quit / exit** — 系统会自动退出配置模式
+3. 根据设备厂商选择正确命令（华为/H3C 用 display，思科用 show）
+4. 每个设备的所有命令放在一次调用的 commands 列表中
+5. 用设备备注名匹配设备（如"核心交换机"、"接入交换机"）
+
+【H3C/华为配置命令速查】:
+- 查看类: display vlan brief / display interface brief / display ip routing-table / display arp / display lldp neighbor-information list / display current-configuration
+- 创建VLAN: vlan 10 然后 name 财务部
+- 删除VLAN: undo vlan 10
+- 配置Access口: interface GigabitEthernet1/0/1 然后 port link-type access 然后 port access vlan 10
+- 配置Trunk口: interface GigabitEthernet1/0/1 然后 port link-type trunk 然后 port trunk permit vlan all
+- 静态路由: ip route-static 192.168.10.0 255.255.255.0 10.0.0.1
+- 保存: save force
+
+【用户意图映射】:
+- "做trunk" / "互联口做trunk" → port link-type trunk + port trunk permit vlan all
+- "通过所有VLAN" → port trunk permit vlan all
+- "划到VLAN 10" → port link-type access + port access vlan 10
+- "两台交换机之间" → 参考拓扑连接信息，找到互联端口，在两端都配置
+- "核心和接入" → 核心交换机 + 接入交换机，在互联端口两端配
+- "开启接口" → undo shutdown
+- "关闭接口" → shutdown
+
+【排错流程】:
+1. 先查状态（display interface brief / display vlan brief）
+2. 根据异常定位问题
+3. 给出修复命令
+4. 执行后再次查看确认"""
+
         # 获取工具定义
-        tools_def = []
-        if hasattr(tools, 'get_tools_definition'):
-            tools_def = tools.get_tools_definition()
-        else:
-            # 手动构建工具定义
-            tools_def = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "ssh_connect",
-                        "description": "SSH连接到网络设备执行命令",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "device": {"type": "string", "description": "设备名称或备注"},
-                                "commands": {"type": "array", "items": {"type": "string"}, "description": "要执行的命令列表"}
-                            },
-                            "required": ["device", "commands"]
-                        }
-                    }
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "telnet_connect",
-                        "description": "Telnet连接到网络设备执行命令",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "device": {"type": "string", "description": "设备名称或备注"},
-                                "commands": {"type": "array", "items": {"type": "string"}, "description": "要执行的命令列表"}
-                            },
-                            "required": ["device", "commands"]
-                        }
-                    }
-                }
-            ]
-        
+        tools_def = tools.get_tools_definition()
+
         messages = [
             {'role': 'system', 'content': system_prompt},
             {'role': 'user', 'content': message}
         ]
-        
+
         # 执行多轮 tool calling
         all_tool_outputs = []
         for _ in range(15):
@@ -669,19 +732,19 @@ def _do_chat(message, selected_device):
                 'tools': tools_def,
                 'tool_choice': 'auto'
             }
-            
+
             resp = http_req.post(f'{base}/chat/completions', headers=headers, json=payload, timeout=120)
             result = resp.json()
             choices = result.get('choices', [])
             if not choices:
                 break
-            
+
             msg = choices[0].get('message', {})
             tool_calls = msg.get('tool_calls', [])
-            
+
             if not tool_calls:
                 return {'success': True, 'response': msg.get('content', ''), 'tool_outputs': '\n'.join(all_tool_outputs)}
-            
+
             messages.append(msg)
             for tc in tool_calls:
                 fn = tc.get('function', {})
@@ -698,7 +761,7 @@ def _do_chat(message, selected_device):
                     'tool_call_id': tc.get('id', ''),
                     'content': raw_text
                 })
-        
+
         last_content = ''
         if messages:
             last = messages[-1]
@@ -714,7 +777,7 @@ def _do_chat(message, selected_device):
 def _parse_links_from_text(text, devices):
     """从 LLM 返回文本和 tool 原始输出中提取链路信息"""
     import re
-    
+
     def find_id(name):
         if not name:
             return None
@@ -725,14 +788,14 @@ def _parse_links_from_text(text, devices):
             if name in (d.get('remark','') or '') or name in (d.get('name','') or ''):
                 return d.get('id')
         return None
-    
+
     raw_links = []
-    
+
     # 策略1：从原始 LLDP 输出中直接提取（最可靠）
     # 通用端口名正则：匹配所有厂商的常见端口命名
     # GigabitEthernet, Ten-GigabitEthernet, FortyGigE, HundredGigE, XGE, 10GE, Ethernet, Eth, GE, Port-channel, Vlanif 等
     PORT_RE = r'(?:GigabitEthernet|Ten-GigabitEthernet|FortyGigE|HundredGigE|XGE|10GE|40GE|100GE|Ethernet|Eth|GE|Port-channel|Vlanif|LoopBack|NULL|Vlan|Bridge-Aggregation|Route-Aggregation)\d+(?:/\d+)*(?:\.\d+)?'
-    
+
     for d in devices:
         dev_name = d.get('remark') or d.get('name')
         dev_id = d.get('id')
@@ -741,7 +804,7 @@ def _parse_links_from_text(text, devices):
         # 匹配对端端口（多种格式：H3C "PortID/subtype : GE1/0/1/Interface name"，思科 "Port ID: GE1/0/1"）
         remote_ports = re.findall(r'(?:PortID/subtype\s*:\s*|Port\s*ID:\s*)(' + PORT_RE + r')', text, re.IGNORECASE)
 
-        
+
         # 配对本地端口和远程端口
         all_local = [p[0] or p[1] or p[2] for p in local_ports if p[0] or p[1] or p[2]]
         for i, lp in enumerate(all_local):
@@ -755,7 +818,7 @@ def _parse_links_from_text(text, devices):
                         'to_name': other_d.get('remark') or other_d.get('name'),
                         'to_port': rp
                     })
-    
+
     # 策略2：如果策略1找到结果，直接用
     if raw_links:
         # 按端口对去重
@@ -778,7 +841,7 @@ def _parse_links_from_text(text, devices):
                     'link_type': 'unknown', 'protocol': 'lldp'
                 }
         return list(port_pairs.values())
-    
+
     # 策略3：从 LLM JSON 回复中提取（备选）
     json_text = re.sub(r'```json\s*', '', text)
     json_text = re.sub(r'```', '', json_text)
@@ -788,7 +851,7 @@ def _parse_links_from_text(text, devices):
         end = json_text.rfind(']')
         if start >= 0 and end >= 0:
             json_text = json_text[start:end+1]
-    
+
     json_patterns = re.findall(r'\[[\s\S]*?\{[\s\S]*?\}[\s\S]*?\]', json_text)
     for jp in json_patterns:
         try:
@@ -804,7 +867,7 @@ def _parse_links_from_text(text, devices):
                             raw_links.append({'from_name': from_name, 'to_name': to_name, 'from_port': from_port, 'to_port': to_port})
         except:
             pass
-    
+
     # 去重
     port_pairs = {}
     for l in raw_links:
@@ -823,7 +886,7 @@ def _parse_links_from_text(text, devices):
                 'from_port': l['from_port'], 'to_port': l['to_port'],
                 'link_type': 'unknown', 'protocol': 'lldp'
             }
-    
+
     return list(port_pairs.values())
 
 @app.route('/api/topology/apply', methods=['POST'])
@@ -874,7 +937,7 @@ def add_device():
     """添加设备并自动识别"""
     try:
         data = request.json or {}
-        
+
         name = data.get('name', '').strip()
         conn_type = data.get('conn_type', 'ssh')
         selected_device_type = (data.get('device_type', '') or '').strip()
@@ -882,7 +945,7 @@ def add_device():
         password = data.get('password', '')
         remark = (data.get('remark', '') or '').strip()
         vendor = (data.get('vendor', '') or '').strip().lower() or 'auto'
-        
+
         devices = load_devices()
         device_id = (data.get('device_id') or '').strip()
 
@@ -924,10 +987,10 @@ def add_device():
             baud = data.get('baud', 115200)
             if not serial_port:
                 return jsonify({'success': False, 'message': '串口设备不能为空'})
-            
+
             for d in devices:
                 if d.get('serial_port') == serial_port:
-                    # 已存在则更新，避免“无法保存”
+                    # 已存在则更新，避免"无法保存"
                     d.update({
                         'name': name or d.get('name') or f'serial-{serial_port}',
                         'conn_type': conn_type,
@@ -940,7 +1003,7 @@ def add_device():
                     })
                     save_devices(devices)
                     return jsonify({'success': True, 'message': '设备已更新', 'device': d})
-            
+
             device = {
                 'id': f'dev_{len(devices)+1}',
                 'name': name or f'serial-{serial_port}',
@@ -958,13 +1021,13 @@ def add_device():
         else:
             ip = data.get('ip', '').strip()
             port = int(data.get('port', 22 if conn_type == 'ssh' else 23))
-            
+
             if not ip:
                 return jsonify({'success': False, 'message': '设备 IP 不能为空'})
-            
+
             for d in devices:
                 if d.get('ip') == ip and d.get('port') == port:
-                    # 已存在则更新，避免“无法保存”
+                    # 已存在则更新，避免"无法保存"
                     d.update({
                         'name': name or d.get('name') or f'{conn_type}-{ip}:{port}',
                         'conn_type': conn_type,
@@ -984,17 +1047,17 @@ def add_device():
                             if device_info:
                                 d.update(device_info)
                                 if d.get('conn_type') == 'telnet' and d.get('ip') in ['127.0.0.1', 'localhost'] and d.get('vendor') == 'unknown':
-                                    d.update({'vendor': 'h3c', 'device_type': 'switch'})
+                                    d.update({'vendor': 'h3c', 'device_type': 'layer2_switch'})
                             elif d.get('conn_type') == 'telnet' and d.get('ip') in ['127.0.0.1', 'localhost']:
                                 # 本地 Telnet 测试环境兜底
-                                d.update({'vendor': 'h3c', 'device_type': 'switch'})
+                                d.update({'vendor': 'h3c', 'device_type': 'layer2_switch'})
                         except Exception as e:
                             print(f"设备识别失败: {e}")
                             if d.get('conn_type') == 'telnet' and d.get('ip') in ['127.0.0.1', 'localhost']:
-                                d.update({'vendor': 'h3c', 'device_type': 'switch'})
+                                d.update({'vendor': 'h3c', 'device_type': 'layer2_switch'})
                     save_devices(devices)
                     return jsonify({'success': True, 'message': '设备已更新', 'device': d})
-            
+
             device = {
                 'id': f'dev_{len(devices)+1}',
                 'name': name or f'{conn_type}-{ip}:{port}',
@@ -1009,7 +1072,7 @@ def add_device():
                 'model': 'unknown',
                 'os_version': 'unknown'
             }
-        
+
         # 尝试自动识别设备信息（厂商/型号/系统版本/设备名）
         if conn_type != 'serial':
             try:
@@ -1017,22 +1080,22 @@ def add_device():
                 if device_info:
                     device.update(device_info)
                     if device.get('conn_type') == 'telnet' and device.get('ip') in ['127.0.0.1', 'localhost'] and device.get('vendor') == 'unknown':
-                        device.update({'vendor': 'h3c', 'device_type': 'switch'})
+                        device.update({'vendor': 'h3c', 'device_type': 'layer2_switch'})
                 elif device.get('conn_type') == 'telnet' and device.get('ip') in ['127.0.0.1', 'localhost']:
                     # 本地 Telnet 测试环境兜底
-                    device.update({'vendor': 'h3c', 'device_type': 'switch'})
+                    device.update({'vendor': 'h3c', 'device_type': 'layer2_switch'})
             except Exception as e:
                 print(f"设备识别失败: {e}")
                 if device.get('conn_type') == 'telnet' and device.get('ip') in ['127.0.0.1', 'localhost']:
-                    device.update({'vendor': 'h3c', 'device_type': 'switch'})
-        
+                    device.update({'vendor': 'h3c', 'device_type': 'layer2_switch'})
+
         # 用户手选了设备类型时，优先使用用户选择。
         if selected_device_type and selected_device_type != 'unknown':
             device['device_type'] = selected_device_type
 
         devices.append(device)
         save_devices(devices)
-        
+
         return jsonify({'success': True, 'device': device})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
@@ -1120,7 +1183,7 @@ def identify_device(device):
 
         info = {
             'vendor': detected_vendor,
-            'device_type': 'switch',
+            'device_type': 'layer2_switch',
             'model': 'unknown',
             'os_version': 'unknown',
         }
@@ -1170,45 +1233,59 @@ def chat():
         message = data.get('message', '')
         context = data.get('context', {})  # 前端传来的上下文
         selected_device = context.get('selected_device')  # 用户选中的设备
-        
+
+        # 自动从消息中提取设备名（如果没选中设备）
+        if not selected_device:
+            devices_all = load_devices()
+            for d in devices_all:
+                remark = d.get('remark') or ''
+                name = d.get('name') or ''
+                ip = d.get('ip') or ''
+                if remark and remark in message:
+                    selected_device = remark
+                    break
+                if ip and ip in message:
+                    selected_device = remark or name
+                    break
+
         if not message:
             return jsonify({'success': False, 'message': '消息不能为空'})
-        
+
         # 加载 LLM 配置
         if not os.path.exists(CONFIG_FILE):
             return jsonify({'success': False, 'message': '请先配置 LLM'})
-        
+
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             config = json.load(f)
-        
+
         endpoint = config.get('endpoint', '')
         api_key = config.get('api_key', '')
         model = config.get('model', '')
-        
+
         if not endpoint or not model:
             return jsonify({'success': False, 'message': '请先配置 LLM'})
-        
+
         import requests
-        
+
         headers = {'Content-Type': 'application/json'}
         if api_key:
             headers['Authorization'] = f'Bearer {api_key}'
-        
+
         base = endpoint.rstrip('/')
         if '/v1' not in base:
             base = base + '/v1'
-        
+
         # 获取设备列表
         devices = load_devices()
         device_info = "\n".join([
             f"- {d['name']} (备注: {d.get('remark', '无')}, IP: {d.get('ip')}, {d.get('conn_type', 'ssh')}, {d.get('vendor', 'unknown')}, 型号: {d.get('model', 'unknown')})"
             for d in devices
         ]) if devices else "暂无设备"
-        
+
         # 如果有选中的设备，高亮显示
         selected_device_info = ""
         selected_devices_list = context.get('selected_devices', [])
-        
+
         if selected_devices_list and len(selected_devices_list) > 1:
             # 多设备模式
             dev_details = []
@@ -1232,10 +1309,10 @@ def chat():
   - 厂商: {d.get('vendor')}
   - 型号: {d.get('model')}
   - 连接方式: {d.get('conn_type')}
-  
+
 用户的所有操作都针对这个设备，除非明确指定其他设备。"""
                     break
-        
+
         topology = load_topology_state()
         topo_links = topology.get('links', [])
         topo_summary = "\n".join([
@@ -1259,56 +1336,70 @@ def chat():
 3. 如果用户说"查看 VLAN"、"查看路由"等，直接操作选中的设备，不要问是哪个设备
 4. 如果用户明确指定设备名/备注，操作指定的设备
 5. 你必须调用工具执行操作，不要只是回复文字！
-6. 不要问用户"是哪个设备"，直接执行！"""
+6. 不要问用户"是哪个设备"，直接执行！
+7. 排错时按步骤执行：先查配置状态 → 再查运行状态 → 最后给结论
+   - VLAN问题：查 display vlan brief → display interface brief → 定位端口
+   - 路由问题：查 display ip routing-table → display ospf peer → 定位邻居
+   - 连通性问题：查 display interface brief → display arp → ping 测试
+8. 如果第一次工具调用的结果不够，继续调用工具获取更多信息（最多3轮）
+9. 回复格式要求：
+   - 先给结论（一句话）
+   - 再给详细信息（设备名、端口、状态）
+   - 最后给修复建议（如果有问题）"""
 
-        # 第一次调用 LLM
+        # 多轮 tool calling（最多 3 轮，支持排错场景）
         messages = [
             {'role': 'system', 'content': system_prompt},
             {'role': 'user', 'content': message}
         ]
-        
-        resp = requests.post(f'{base}/chat/completions', headers=headers, json={
-            'model': model,
-            'messages': messages,
-            'tools': get_tools_definition(),
-            'tool_choice': 'auto',
-            'max_tokens': 2000
-        }, timeout=60)
-        
-        if resp.status_code != 200:
-            return jsonify({'success': False, 'message': f'LLM 错误: {resp.status_code}'})
-        
-        result = resp.json()
-        choice = result.get('choices', [{}])[0]
-        tool_calls = choice.get('message', {}).get('tool_calls', [])
-        
-        if tool_calls:
-            tool_results = []
-            all_commands = []
-            
+
+        all_tool_results = []
+        all_commands = []
+        max_rounds = 3
+
+        for round_idx in range(max_rounds):
+            resp = requests.post(f'{base}/chat/completions', headers=headers, json={
+                'model': model,
+                'messages': messages,
+                'tools': get_tools_definition(),
+                'tool_choice': 'auto',
+                'max_tokens': 2000
+            }, timeout=60)
+
+            if resp.status_code != 200:
+                return jsonify({'success': False, 'message': f'LLM 错误: {resp.status_code}'})
+
+            result = resp.json()
+            choice = result.get('choices', [{}])[0]
+            tool_calls = choice.get('message', {}).get('tool_calls', [])
+
+            if not tool_calls:
+                # LLM 没有请求工具，直接返回回复
+                reply = choice.get('message', {}).get('content', '无响应')
+                return jsonify({'success': True, 'response': reply})
+
+            # 执行工具调用
+            messages.append(choice['message'])
+
             for tool_call in tool_calls:
                 tool_name = tool_call.get('function', {}).get('name', '')
                 arguments = json.loads(tool_call.get('function', {}).get('arguments', '{}'))
-                
+
                 if tool_name in ['ssh_connect', 'telnet_connect']:
-                    # 多设备目标解析：支持“所有/全部/批量”以及在句子中直接点名多台设备。
+                    # 多设备目标解析
                     all_kw = ['所有', '全部', '批量', 'all devices', 'all']
                     wants_all = any(k in message.lower() for k in [x.lower() for x in all_kw])
-
                     arg_device = (arguments.get('device') or '').strip()
                     matched = []
 
-                    # 1) 备注优先：用户消息里出现备注时，优先按备注命中。
                     for d in devices:
                         dr = d.get('remark', '')
                         if dr and dr in message:
                             matched.append(d)
 
-                    # 2) 再按参数设备名匹配
                     if not matched and arg_device and arg_device not in ['all', 'ALL', '所有', '全部']:
                         matched = [d for d in devices if d.get('name') == arg_device or d.get('ip') == arg_device or d.get('remark') == arg_device]
 
-                    # 3) 再按用户文本中出现的设备名/IP匹配多台
                     if not matched:
                         for d in devices:
                             dn = d.get('name', '')
@@ -1317,15 +1408,13 @@ def chat():
                             if (dn and dn in message) or (dip and dip in message) or (dr and dr in message):
                                 matched.append(d)
 
-                    # 3) 全量/选中/默认兜底
                     if wants_all:
                         matched = devices[:]
                     elif not matched and selected_device:
-                        matched = [d for d in devices if d.get('name') == selected_device]
+                        matched = [d for d in devices if d.get('name') == selected_device or d.get('remark') == selected_device]
                     elif not matched and devices:
                         matched = [devices[0]]
 
-                    # 去重
                     uniq = []
                     seen = set()
                     for d in matched:
@@ -1335,7 +1424,6 @@ def chat():
                             uniq.append(d)
                     matched = uniq
 
-                    # 批量执行：按每台设备连接方式自动选 ssh/telnet
                     for d in matched:
                         conn_type = d.get('conn_type', 'ssh')
                         if conn_type == 'ssh' and (not d.get('username') or not d.get('password')):
@@ -1344,87 +1432,66 @@ def chat():
                         else:
                             actual_tool = 'telnet_connect' if conn_type == 'telnet' else 'ssh_connect'
                             per_args = dict(arguments)
-                            per_args['device'] = d.get('name')
+                            per_args['device'] = d.get('remark') or d.get('name')
                             tool_result = tools.execute_tool(actual_tool, per_args)
 
-                        tool_results.append({
-                            'tool_call_id': tool_call.get('id', ''),
+                        all_tool_results.append(tool_result)
+                        messages.append({
                             'role': 'tool',
-                            'name': actual_tool,
+                            'tool_call_id': tool_call.get('id', ''),
                             'content': json.dumps(tool_result, ensure_ascii=False)
                         })
 
                         if tool_result.get('results'):
                             all_commands.extend([r.get('command') for r in tool_result['results']])
-
                     continue
 
-                # 非设备连接类工具，按原路径执行
+                # 非设备连接类工具
                 tool_result = tools.execute_tool(tool_name, arguments)
-                tool_results.append({
-                    'tool_call_id': tool_call.get('id', ''),
-                    'role': 'tool',
-                    'name': tool_name,
-                    'content': json.dumps(tool_result, ensure_ascii=False)
-                })
-
-                if tool_result.get('results'):
-                    all_commands.extend([r.get('command') for r in tool_result['results']])
-            
-            # 发回 LLM 生成最终回复
-            messages.append(choice['message'])
-            for tr in tool_results:
+                all_tool_results.append(tool_result)
                 messages.append({
                     'role': 'tool',
-                    'tool_call_id': tr['tool_call_id'],
-                    'content': tr['content']
+                    'tool_call_id': tool_call.get('id', ''),
+                    'content': json.dumps(tool_result, ensure_ascii=False)
                 })
-            
-            resp2 = requests.post(f'{base}/chat/completions', headers=headers, json={
-                'model': model,
-                'messages': messages,
-                'max_tokens': 2000
-            }, timeout=60)
-            
-            # 构建回复
-            response_parts = []
-            
-            # 1. 如果工具执行成功且有结果
-            for tr in tool_results:
-                result_data = json.loads(tr['content'])
-                if result_data.get('success') and result_data.get('results'):
-                    for r in result_data['results']:
-                        response_parts.append(f"命令: {r['command']}")
-                        response_parts.append(f"输出:\n{r['output'][:2000]}")
-                        response_parts.append("---")
-                elif not result_data.get('success'):
-                    response_parts.append(f"❌ 执行失败: {result_data.get('error', result_data.get('message', '未知错误'))}")
-            
-            # 2. LLM 的解读
-            if resp2.status_code == 200:
-                llm_reply = resp2.json().get('choices', [{}])[0].get('message', {}).get('content', '')
-                # 清理工具请求格式
-                if '[TOOL_REQUEST]' not in llm_reply:
-                    response_parts.insert(0, llm_reply)
-            
-            final_reply = '\n'.join(response_parts) if response_parts else '操作完成'
-            
-            return jsonify({
-                'success': True,
-                'response': final_reply,
-                'executed': True,
-                'tool_calls': [
-                    {'name': tc.get('function', {}).get('name'), 'arguments': json.loads(tc.get('function', {}).get('arguments', '{}'))}
-                    for tc in tool_calls
-                ],
-                'tool_results': [json.loads(tr['content']) for tr in tool_results],
-                'commands': all_commands
-            })
+                if tool_result.get('results'):
+                    all_commands.extend([r.get('command') for r in tool_result['results']])
+
+        # 达到最大轮数，让 LLM 生成最终回复
+        resp2 = requests.post(f'{base}/chat/completions', headers=headers, json={
+            'model': model,
+            'messages': messages,
+            'max_tokens': 2000
+        }, timeout=60)
         
-        else:
-            reply = choice.get('message', {}).get('content', '无响应')
-            return jsonify({'success': True, 'response': reply})
-    
+        # 构建回复
+        response_parts = []
+        
+        for tr_data in all_tool_results:
+            if tr_data.get('success') and tr_data.get('results'):
+                for r in tr_data['results']:
+                    response_parts.append(f"命令: {r['command']}")
+                    response_parts.append(f"输出:\n{r['output'][:2000]}")
+                    response_parts.append("---")
+            elif not tr_data.get('success'):
+                response_parts.append(f"❌ 执行失败: {tr_data.get('error', tr_data.get('message', '未知错误'))}")
+        
+        # LLM 的解读
+        if resp2.status_code == 200:
+            llm_reply = resp2.json().get('choices', [{}])[0].get('message', {}).get('content', '')
+            if '[TOOL_REQUEST]' not in llm_reply:
+                response_parts.insert(0, llm_reply)
+        
+        final_reply = '\n'.join(response_parts) if response_parts else '操作完成'
+        
+        return jsonify({
+            'success': True,
+            'response': final_reply,
+            'executed': True,
+            'tool_results': all_tool_results,
+            'commands': all_commands
+        })
+
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1434,9 +1501,9 @@ def handle_local_intent(message):
     """处理本地操作意图 - 类似 OpenClaw 的工具调用"""
     import subprocess
     import os
-    
+
     workdir = r'Z:\netops-ai'
-    
+
     # 查看文件
     if '查看文件' in message or '读取文件' in message or 'cat ' in message:
         import re
@@ -1445,7 +1512,7 @@ def handle_local_intent(message):
             path = match.group(1).strip('"\'')
             if not os.path.isabs(path):
                 path = os.path.join(workdir, path)
-            
+
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read(5000)  # 限制大小
@@ -1455,7 +1522,7 @@ def handle_local_intent(message):
                     'content': content,
                     'summary': f'已读取文件: {path}'
                 }
-    
+
     # 列出目录
     if '列出' in message and ('目录' in message or '文件' in message or 'ls' in message):
         import re
@@ -1463,7 +1530,7 @@ def handle_local_intent(message):
         path = match.group(1) if match else workdir
         if not os.path.isabs(path):
             path = os.path.join(workdir, path)
-        
+
         if os.path.isdir(path):
             files = os.listdir(path)[:50]
             return {
@@ -1472,7 +1539,7 @@ def handle_local_intent(message):
                 'files': files,
                 'summary': f'目录 {path} 包含 {len(files)} 个文件:\n' + '\n'.join(files[:20])
             }
-    
+
     # 执行命令
     if '执行' in message or '运行' in message:
         import re
@@ -1498,7 +1565,7 @@ def handle_local_intent(message):
                 }
             except Exception as e:
                 return {'type': 'exec', 'success': False, 'error': str(e)}
-    
+
     # 查看配置
     if '查看配置' in message or '当前配置' in message:
         config_file = os.path.join(workdir, 'web', 'data', 'llm_config.json')
@@ -1508,7 +1575,7 @@ def handle_local_intent(message):
                     'type': 'config',
                     'summary': f'当前 LLM 配置:\n{f.read()}'
                 }
-    
+
     return None
 
 
@@ -1520,22 +1587,22 @@ def execute_commands(device, commands):
     password = device.get('password', '')
     vendor = device.get('vendor', 'huawei')
     conn_type = device.get('conn_type', 'ssh')
-    
+
     # Telnet 模拟器场景允许空凭证；SSH/串口仍要求凭证。
     if conn_type != 'telnet' and (not username or not password):
         return {'success': False, 'message': '设备缺少登录凭证'}
-    
+
     results = []
-    
+
     try:
         if conn_type == 'serial':
             # 串口连接
             import serial
             import time
-            
+
             serial_port = device.get('serial_port', 'COM1')
             baud = device.get('baud', 9600)
-            
+
             ser = serial.Serial(
                 port=serial_port,
                 baudrate=baud,
@@ -1544,40 +1611,40 @@ def execute_commands(device, commands):
                 stopbits=1,
                 timeout=5
             )
-            
+
             time.sleep(1)  # 等待连接稳定
-            
+
             # 发送回车唤醒
             ser.write(b'\r\n')
             time.sleep(0.5)
-            
+
             # 读取提示
             output = ser.read(4096).decode('utf-8', errors='ignore')
-            
+
             # 如果需要登录
             if 'Username' in output or 'login' in output.lower():
                 ser.write((username + '\r\n').encode())
                 time.sleep(0.5)
                 output += ser.read(4096).decode('utf-8', errors='ignore')
-            
+
             if 'Password' in output or 'password' in output.lower():
                 ser.write((password + '\r\n').encode())
                 time.sleep(0.5)
                 output += ser.read(4096).decode('utf-8', errors='ignore')
-            
+
             # 执行命令
             for cmd in commands:
                 ser.write((cmd + '\r\n').encode())
                 time.sleep(1)
                 cmd_output = ser.read(8192).decode('utf-8', errors='ignore')
                 results.append({'command': cmd, 'output': cmd_output})
-            
+
             ser.close()
-            
+
         else:
             # SSH/Telnet 连接
             from netmiko import ConnectHandler
-            
+
             if conn_type == 'telnet':
                 telnet_type_map = {
                     'huawei': 'huawei_telnet',
@@ -1596,7 +1663,7 @@ def execute_commands(device, commands):
                     'juniper': 'juniper_junos'
                 }
                 device_type = device_type_map.get(vendor, 'huawei')
-            
+
             device_params = {
                 'device_type': device_type,
                 'host': ip,
@@ -1605,7 +1672,7 @@ def execute_commands(device, commands):
                 'password': password,
                 'timeout': 30,
             }
-            
+
             with ConnectHandler(**device_params) as conn:
                 for cmd in commands:
                     if conn_type == 'telnet':
@@ -1613,9 +1680,9 @@ def execute_commands(device, commands):
                     else:
                         output = conn.send_command(cmd, read_timeout=30)
                     results.append({'command': cmd, 'output': output})
-        
+
         return {'success': True, 'commands': commands, 'results': results}
-    
+
     except ImportError as e:
         missing = 'pyserial' if conn_type == 'serial' else 'netmiko'
         return {'success': False, 'message': f'{missing} 未安装，执行: pip install {missing}'}
@@ -1638,15 +1705,15 @@ def api_exec():
     try:
         data = request.json or {}
         cmd = data.get('command', '')
-        
+
         if not cmd:
             return jsonify({'success': False, 'message': '命令不能为空'})
-        
+
         # 安全检查：禁止危险命令
         dangerous = ['rm -rf', 'del /', 'format', 'mkfs', 'dd if=']
         if any(d in cmd for d in dangerous):
             return jsonify({'success': False, 'message': '禁止执行危险命令'})
-        
+
         import subprocess
         result = subprocess.run(
             cmd,
@@ -1655,7 +1722,7 @@ def api_exec():
             text=True,
             timeout=60
         )
-        
+
         return jsonify({
             'success': result.returncode == 0,
             'stdout': result.stdout,
@@ -1673,24 +1740,24 @@ def api_file_read():
     try:
         data = request.json or {}
         path = data.get('path', '')
-        
+
         if not path:
             return jsonify({'success': False, 'message': '路径不能为空'})
-        
+
         # 安全检查：只允许读取工作目录下的文件
         import os
         workdir = r'Z:\netops-ai'
         abs_path = os.path.abspath(path)
-        
+
         if not abs_path.startswith(workdir):
             return jsonify({'success': False, 'message': '只能读取项目目录下的文件'})
-        
+
         if not os.path.exists(abs_path):
             return jsonify({'success': False, 'message': '文件不存在'})
-        
+
         with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
-        
+
         return jsonify({'success': True, 'content': content})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
@@ -1702,23 +1769,23 @@ def api_file_write():
         data = request.json or {}
         path = data.get('path', '')
         content = data.get('content', '')
-        
+
         if not path:
             return jsonify({'success': False, 'message': '路径不能为空'})
-        
+
         # 安全检查
         import os
         workdir = r'Z:\netops-ai'
         abs_path = os.path.abspath(path)
-        
+
         if not abs_path.startswith(workdir):
             return jsonify({'success': False, 'message': '只能写入项目目录'})
-        
+
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        
+
         with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        
+
         return jsonify({'success': True, 'path': abs_path})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
@@ -1730,25 +1797,25 @@ def delete_device():
         data = request.json or {}
         device_id = data.get('device_id') or data.get('id')
         device_name = data.get('name')
-        
+
         if not device_id and not device_name:
             return jsonify({'success': False, 'message': '请指定要删除的设备'})
-        
+
         devices = load_devices()
         original_count = len(devices)
-        
+
         if device_id:
             devices = [d for d in devices if d['id'] != device_id]
         else:
             devices = [d for d in devices if d['name'] != device_name]
-        
+
         if len(devices) == original_count:
             return jsonify({'success': False, 'message': '设备不存在'})
-        
+
         save_devices(devices)
-        
+
         return jsonify({
-            'success': True, 
+            'success': True,
             'message': '设备已删除',
             'remaining': len(devices)
         })
@@ -1771,18 +1838,16 @@ def device_collect():
         if not target:
             return jsonify({'success': False, 'message': f'设备 {device_name} 不存在'})
 
-        # 通过工具执行采集命令
-        collect_cmds = [
-            'display vlan brief',
-            'display interface brief',
-            'display ip interface brief',
-            'show vlan brief',
-            'show ip interface brief',
-            'show interfaces status',
-        ]
+        # 通过工具执行采集命令（按厂商选命令）
+        vendor = (target.get('vendor') or '').lower()
+        if vendor in ('cisco',):
+            collect_cmds = ['show vlan brief', 'show ip interface brief', 'show interfaces status']
+        else:
+            collect_cmds = ['display vlan brief', 'display interface brief']
         conn_type = target.get('conn_type', 'ssh')
+        dev_id = target.get('remark') or target.get('name')
         tool_name = 'telnet_connect' if conn_type == 'telnet' else 'ssh_connect'
-        res = tools.execute_tool(tool_name, {'device': target.get('name'), 'commands': collect_cmds})
+        res = tools.execute_tool(tool_name, {'device': dev_id, 'commands': collect_cmds})
 
         if not res.get('success'):
             return jsonify({'success': False, 'message': '采集失败：' + str(res.get('error', ''))})
@@ -1811,16 +1876,22 @@ def device_collect():
         facts['vlan_count'] = len(vlan_ids)
         facts['vlan_list'] = sorted(list(vlan_ids))[:20]
 
-        # 提取 UP 接口数
+        # 提取 UP 接口数（H3C/华为格式：GE1/0/1(U) 中的 U 表示 UP，D 表示 DOWN）
         up_count = 0
         total_count = 0
-        for line in all_output.splitlines():
-            line = line.strip()
-            # 匹配接口行（含 GE/Gigabit/Eth/Port 等）
-            if re.search(r'^(GE|GigabitEthernet|Ethernet|Eth|Ten-GigabitEthernet|XGE|Po|Vlanif|Vlan|Loop|NULL)', line, re.IGNORECASE):
-                total_count += 1
-                if re.search(r'\bup\b', line, re.IGNORECASE) and not re.search(r'\bdown\b', line, re.IGNORECASE):
-                    up_count += 1
+        # 方式1：H3C/华为 VLAN 输出中的 (U)/(D)
+        for m in re.finditer(r'((?:GE|GigabitEthernet|Eth|Ethernet|XGE|Ten-GigabitEthernet|FGE|Po|LAG)[\d/]+)\(([UD])\)', all_output, re.IGNORECASE):
+            total_count += 1
+            if m.group(2).upper() == 'U':
+                up_count += 1
+        # 方式2：接口输出中的 UP/DOWN 行
+        if total_count == 0:
+            for line in all_output.splitlines():
+                line = line.strip()
+                if re.search(r'^(GE|GigabitEthernet|Ethernet|Eth|Ten-GigabitEthernet|XGE|Po|Vlanif|Vlan|Loop|NULL|MGE|InLoop|REG|FGE)', line, re.IGNORECASE):
+                    total_count += 1
+                    if re.search(r'\bUP\b', line, re.IGNORECASE) and not re.search(r'\bDOWN\b', line, re.IGNORECASE):
+                        up_count += 1
         facts['up_interfaces'] = up_count
         facts['total_interfaces'] = total_count
 

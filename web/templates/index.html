@@ -49,11 +49,22 @@
     .topo-head { display:flex; align-items:center; gap:4px; }
     .node-dot { width: 8px; height: 8px; border-radius: 50%; background:#22d3ee; box-shadow:0 0 6px #22d3ee; flex: 0 0 8px; }
     .node-icon { width: 14px; height: 14px; flex: 0 0 14px; }
-    .node-remark { font-size: 11px; font-weight: 700; color: #d1fafb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 16px; }
+    .node-remark { font-size: 11px; font-weight: 700; color: #d1fafb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 16px; flex: 1; }
+    .node-status { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 6px; margin-left: auto; }
+    .node-status.online { background: #34d399; box-shadow: 0 0 4px #34d399; }
+    .node-status.offline { background: #6b7280; }
     .node-chips { display: flex; gap: 2px; flex-wrap: nowrap; overflow: hidden; margin-top: 2px; }
     .chip { font-size: 9px; padding: 0 3px; border-radius: 2px; background: rgba(34,211,238,0.15); color: #67e8f9; white-space: nowrap; line-height: 12px; }
     .chip.warn { background: rgba(251,146,60,0.2); color: #fb923c; }
     .chip.ok { background: rgba(52,211,153,0.2); color: #34d399; }
+    .cmd-output { margin:4px 0; border:1px solid #1e293b; border-radius:4px; overflow:hidden; }
+    .cmd-header { display:flex; justify-content:space-between; padding:4px 8px; background:rgba(30,41,59,0.8); cursor:pointer; font-size:11px; color:#94a3b8; }
+    .cmd-header:hover { background:rgba(51,65,85,0.8); }
+    .cmd-name { color:#e2e8f0; font-weight:600; }
+    .cmd-toggle { color:#64748b; font-size:10px; }
+    .cmd-body { padding:6px 8px; background:rgba(6,15,27,0.6); font-size:10px; color:#94a3b8; max-height:300px; overflow-y:auto; }
+    .cmd-body.collapsed { max-height:60px; overflow:hidden; position:relative; }
+    .cmd-body.collapsed::after { content:''; position:absolute; bottom:0; left:0; right:0; height:20px; background:linear-gradient(transparent,rgba(6,15,27,0.9)); }
     .chip.ok { background: rgba(52,211,153,0.2); color: #34d399; }
     .topo-edge { stroke: #22d3ee; stroke-width: 1.8; opacity: 0.9; fill: none; }
     .topo-edge.trunk { stroke: #f59e0b; }
@@ -139,6 +150,7 @@
           </select>
           <button class="btn" id="btn-refresh-now" style="font-size:11px;padding:6px 10px;min-height:28px;">立即刷新</button>
         </div>
+        <div id="topo-debug" style="position:absolute;top:0;left:0;z-index:999;background:#000;color:#0f0;font-size:10px;padding:4px;"></div>
         <div class="topology-infinite" id="topology-infinite">
           <div class="topology-world" id="topology-world">
             <svg id="topology-svg"></svg>
@@ -152,7 +164,7 @@
           <div class="msg msg-system">拓扑在上，对话在下。Ctrl+点击拓扑节点可多选设备，多选后操作会批量执行。</div>
         </div>
         <div class="chat-input">
-          <input id="chat-input" placeholder="输入命令或问题（拓扑中选中的设备为目标）">
+          <input id="chat-input" placeholder="输入命令或问题，可直接说设备备注名或IP（如：核心交换机查路由表、127.0.0.1查版本）">
           <button class="btn" id="btn-stop" style="display:none;background:#dc2626;border-color:#dc2626;color:#fff;">停止</button>
           <button class="btn" id="btn-send">发送</button>
         </div>
@@ -202,6 +214,8 @@
     <div class="modal-box">
       <div class="modal-head"><strong>连接方式编辑</strong><button class="close" onclick="closeModal('modal-conn')">×</button></div>
       <div class="form-group"><label>连接方式</label><select id="conn-type" onchange="toggleConnFields()"><option value="ssh">SSH</option><option value="telnet">Telnet</option><option value="serial">串口</option></select></div>
+      <div class="form-group"><label>设备类型</label><select id="conn-device-type"><option value="layer2_switch">二层交换机</option><option value="layer3_switch">三层交换机</option><option value="router">路由器</option><option value="firewall">防火墙</option><option value="unknown">自动识别</option></select></div>
+      <div class="form-group"><label>备注</label><input id="conn-remark" placeholder="例如：核心交换机"></div>
       <div id="conn-net-fields">
         <div class="form-group"><label>IP</label><input id="conn-ip" placeholder="192.168.1.1"></div>
         <div class="form-group"><label>端口</label><input id="conn-port" value="22"></div>
@@ -497,10 +511,13 @@
       openModal('modal-device');
     }
 
-    function openConnEditor() {
+    function openConnEditor(id) {
+      if (id) { selectedIds.clear(); selectedIds.add(id); selectedId = id; }
       const d = devices.find(x => x.id === selectedId);
       if (!d) { alert('请先选中设备'); return; }
       document.getElementById('conn-type').value = d.conn_type || 'ssh';
+      document.getElementById('conn-device-type').value = d.device_type || 'unknown';
+      document.getElementById('conn-remark').value = d.remark || '';
       document.getElementById('conn-ip').value = d.ip || '';
       document.getElementById('conn-port').value = String(d.port || (d.conn_type === 'telnet' ? 23 : 22));
       document.getElementById('conn-serial').value = d.serial_port || '';
@@ -518,8 +535,8 @@
       const payload = {
         device_id: d.id,
         conn_type: connType,
-        device_type: d.device_type || 'unknown',
-        remark: d.remark || '',
+        device_type: document.getElementById('conn-device-type').value || d.device_type || 'unknown',
+        remark: document.getElementById('conn-remark').value.trim(),
         username: document.getElementById('conn-user').value.trim(),
         password: document.getElementById('conn-pass').value,
       };
@@ -678,6 +695,12 @@
           }
         }
       });
+
+      // 首次提示
+      if (!window._topoTipShown) {
+        window._topoTipShown = true;
+        addMsg('system', '💡 滚轮缩放拓扑 · 拖拽移动节点 · Ctrl+点击多选 · 双击左侧设备打开配置');
+      }
     }
 
     function renderAll() {
@@ -694,7 +717,7 @@
       }
       // 按设备类型分组
       const groups = {};
-      const typeLabels = {layer2_switch:'二层交换机',layer3_switch:'三层交换机',router:'路由器',firewall:'防火墙',unknown:'未分类'};
+      const typeLabels = {layer2_switch:'二层交换机',layer3_switch:'三层交换机',router:'路由器',firewall:'防火墙',switch:'二层交换机',unknown:'未分类'};
       devices.forEach(d => {
         const t = d.device_type || 'unknown';
         if (!groups[t]) groups[t] = [];
@@ -712,8 +735,9 @@
           </div>
           <div class="dev-group-body">`;
         groups[type].forEach(d => {
-          html += `<div class="device-item" onclick="openConnEditor('${d.id}')" title="点击编辑连接方式">
-            <div class="device-name">${d.remark || d.name}</div>
+          const onlineDot = d.facts && d.facts.last_collected ? '<span style="width:6px;height:6px;border-radius:50%;background:#34d399;display:inline-block;margin-right:4px;box-shadow:0 0 4px #34d399;"></span>' : '<span style="width:6px;height:6px;border-radius:50%;background:#6b7280;display:inline-block;margin-right:4px;"></span>';
+          html += `<div class="device-item" onclick="openConnEditor('${d.id}')" ondblclick="selectAndConfigDevice('${d.id}')" title="单击编辑连接 · 双击打开配置">
+            <div class="device-name">${onlineDot}${d.remark || d.name}</div>
             <div class="device-ip">${d.conn_type || 'ssh'}://${d.ip || d.serial_port || 'N/A'}${d.port ? ':' + d.port : ''}</div>
           </div>`;
         });
@@ -723,6 +747,7 @@
     }
 
     function renderTopology() {
+      const typeLabels = {layer2_switch:'二层交换机',layer3_switch:'三层交换机',router:'路由器',firewall:'防火墙',switch:'二层交换机',unknown:'未分类'};
       const nodeLayer = document.getElementById('topology-node-layer');
       const svg = document.getElementById('topology-svg');
       const world = document.getElementById('topology-world');
@@ -824,8 +849,8 @@
           chips += facts.last_collected ? `<span class="chip ok">● 在线</span>` : `<span class="chip" style="color:#6b7280;">○ 未采集</span>`;
           const selCls = selectedIds.has(n.id) ? ' selected' : '';
           return `
-          <div class="topo-node ${cls}${selCls}" data-id="${n.id}" style="left:${n.x}px; top:${n.y}px;" onclick="openTopologyDeviceConfig('${n.id}', event)" title="${n.remark || n.name} | ${n.ip || 'N/A'}">
-            <div class="topo-head">${iconSvg(t)}<div class="node-remark">${n.remark || n.name || '未命名设备'}</div></div>
+          <div class="topo-node ${cls}${selCls}" data-id="${n.id}" style="left:${n.x}px; top:${n.y}px;" onclick="selectTopoNode('${n.id}', event)" ondblclick="openTopologyDeviceConfig('${n.id}', event)" title="${n.remark || n.name}\nIP: ${n.ip || 'N/A'}\n类型: ${typeLabels[n.deviceType] || n.deviceType}\n${n.facts && n.facts.vlan_count ? 'VLAN: ' + n.facts.vlan_count : ''}\n${n.facts && n.facts.up_interfaces != null ? 'UP接口: ' + n.facts.up_interfaces + '/' + n.facts.total_interfaces : ''}\n单击选中 · 双击打开配置">
+            <div class="topo-head">${iconSvg(t)}<div class="node-remark">${n.remark || n.name || '未命名设备'}</div><span class="node-status ${n.facts && n.facts.last_collected ? 'online' : 'offline'}"></span></div>
             ${chips ? `<div class="node-chips">${chips}</div>` : ''}
           </div>
         `;
@@ -895,7 +920,7 @@
           const tag2x = x1 + (x2-x1)*0.78 + (-uy)*lineOff;
           const tag2y = y1 + (y2-y1)*0.78 + (ux)*lineOff;
 
-          return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="2" stroke-linecap="round" opacity="0.8"/>
+          return `<line class="topo-link" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="2" stroke-linecap="round" opacity="0.8"/>
                   <rect x="${tag1x-17}" y="${tag1y-9}" width="35" height="13" rx="2" fill="rgba(6,15,27,0.92)" stroke="${color}" stroke-width="0.5"/>
                   <text x="${tag1x}" y="${tag1y}" fill="${color}" font-size="9" font-family="monospace" text-anchor="middle" font-weight="600">${lp}</text>
                   <rect x="${tag2x-17}" y="${tag2y-9}" width="35" height="13" rx="2" fill="rgba(6,15,27,0.92)" stroke="${color}" stroke-width="0.5"/>
@@ -924,8 +949,10 @@
         username: editingBasicOnly && current ? (current.username || '') : document.getElementById('add-user').value.trim(),
         password: editingBasicOnly && current ? (current.password || '') : document.getElementById('add-pass').value
       };
-      if (editingBasicOnly && editingDeviceId) {
+      if (editingDeviceId) {
         payload.device_id = editingDeviceId;
+      }
+      if (editingBasicOnly && editingDeviceId) {
         payload.basic_only = true;
       }
 
@@ -1041,7 +1068,37 @@
       _chatBusy = false;
       document.getElementById('btn-stop').style.display = 'none';
       document.getElementById('btn-send').style.display = '';
+      const tp = document.getElementById('thinking-placeholder');
+      if (tp) tp.remove();
       addMsg('system', '⏹ 已停止');
+    }
+
+    async function fullDiagnose(dev) {
+      if (_chatBusy) return;
+      addMsg('user', `🔍 全面诊断: ${dev}`);
+      _chatBusy = true;
+      _chatAbort = new AbortController();
+      const thinkingHtml = '<div class="chat-msg ai" id="thinking-placeholder"><span style="color:#67e8f9">⏳ 正在全面诊断...</span></div>';
+      document.getElementById('messages').insertAdjacentHTML('beforeend', thinkingHtml);
+      try {
+        const r = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: `对 ${dev} 执行全面诊断：1.检查接口状态(display interface brief) 2.检查VLAN(display vlan brief) 3.检查ARP(display arp) 4.检查路由表(display ip routing-table) 5.检查CPU和内存(display cpu-usage, display memory) 6.检查LLDP邻居(display lldp neighbor-information list)。对每项给出状态总结，最后给一个整体健康评分(0-100分)。`, context: { selected_device: dev } }),
+          signal: _chatAbort.signal
+        });
+        const res = await r.json();
+        const tp = document.getElementById('thinking-placeholder');
+        if (tp) tp.remove();
+        addMsg('ai', res.response || '无响应');
+      } catch (e) {
+        const tp = document.getElementById('thinking-placeholder');
+        if (tp) tp.remove();
+        addMsg('ai', '❌ 诊断失败');
+      } finally {
+        _chatBusy = false;
+        _chatAbort = null;
+      }
     }
 
     async function sendChat() {
@@ -1114,6 +1171,21 @@
 
     // ===== 配置中心（拓扑节点点击弹出） =====
 
+    function selectTopoNode(id, evt) {
+      if (_clickMoved) return;
+      const isCtrl = evt && (evt.ctrlKey || evt.metaKey);
+      if (isCtrl) {
+        if (selectedIds.has(id)) selectedIds.delete(id);
+        else selectedIds.add(id);
+      } else {
+        selectedIds.clear();
+        selectedIds.add(id);
+      }
+      selectedId = selectedIds.size > 0 ? Array.from(selectedIds).pop() : null;
+      renderAll();
+      updateSelectionInfo();
+    }
+
     function openTopologyDeviceConfig(id, evt) {
       // 如果刚拖拽过，忽略点击
       if (_clickMoved) return;
@@ -1146,7 +1218,16 @@
       }
     }
 
-    let _cfgTab = '查看';
+    function selectAndConfigDevice(id) {
+      selectedIds.clear();
+      selectedIds.add(id);
+      selectedId = id;
+      renderAll();
+      renderConfigPanel();
+      openModal('modal-config');
+    }
+
+    let _cfgTab = '概览';
     let _cfgDevice = '';
 
     function renderConfigPanel() {
@@ -1180,9 +1261,8 @@
       }
 
       // 构建 tab 列表
-      let tabs = [{k:'查看',l:'📋 查看'},{k:'VLAN',l:'🏷 VLAN'},{k:'接口',l:'🔌 接口'},{k:'端口模式',l:'🔗 端口模式'}];
-      if(isL3) tabs.push({k:'L3路由',l:'🌐 L3路由'});
-      if(isR||isFw) tabs.push({k:'安全策略',l:'🛡 安全策略'});
+      let tabs = [{k:'概览',l:'📋 概览'},{k:'接口',l:'🔌 接口'},{k:'二层',l:'🏷 二层'}];
+      if(isL3) tabs.push({k:'三层',l:'🌐 三层'});
       tabs.push({k:'系统',l:'⚙ 系统'});
       tabs.push({k:'诊断',l:'🔍 诊断'});
 
@@ -1191,10 +1271,9 @@
         thtml += `<button class="cfg-tab${_cfgTab===t.k?' active':''}" data-tab="${t.k}" onclick="switchCfgTab('${t.k}')">${t.l}</button>`;
       });
       thtml += `</div>`;
-      thtml += `</div>`;
       thtml += `<div id="cfg-tab-content"></div>`;
-
-      document.getElementById('config-tabs').style.display = 'none';
+      thtml += `<div id="cfg-query-result" class="config-result" style="display:none;"></div>`;
+      thtml += `</div>`;
       document.getElementById('config-panel').innerHTML = thtml;
       switchCfgTab(_cfgTab);
     }
@@ -1205,258 +1284,133 @@
       const el = document.getElementById('cfg-tab-content');
       const d = devices.find(x => x.id === selectedId);
       const dtype = (d?.device_type || '').toLowerCase();
-      const isL3 = dtype.includes('layer3')||dtype.includes('router')||dtype.includes('firewall');
+      const isL3 = dtype.includes('layer3') || dtype.includes('router') || dtype.includes('firewall');
       const dev = _cfgDevice;
       switch(tab) {
-        case '查看': el.innerHTML = buildTabView(dev); break;
-        case 'VLAN': el.innerHTML = buildTabVlan(dev); break;
+        case '概览': el.innerHTML = buildTabOverview(dev); break;
         case '接口': el.innerHTML = buildTabInterface(dev); break;
-        case '端口模式': el.innerHTML = buildTabPortMode(dev); break;
-        case 'L3路由': el.innerHTML = isL3 ? buildTabL3(dev) : '<div style="color:#94a3b8;font-size:12px;">此设备不支持三层配置</div>'; break;
-        case '安全策略': el.innerHTML = buildTabSecurity(dev); break;
+        case '二层': el.innerHTML = buildTabLayer2(dev); break;
+        case '三层': el.innerHTML = isL3 ? buildTabL3(dev) : '<div style="color:#94a3b8;font-size:12px;padding:8px;">此设备不支持三层配置</div>'; break;
         case '系统': el.innerHTML = buildTabSystem(dev); break;
         case '诊断': el.innerHTML = buildTabDiag(dev); break;
       }
     }
 
-    // ===== Tab: 查看 =====
-    function buildTabView(dev) {
+    function buildTabOverview(dev) {
       const btns = [
-        ['当前配置','查看 running-config'],['VLAN 信息','查看所有 VLAN 信息'],['VLAN Brief','查看 VLAN 简要信息'],
-        ['接口状态','查看接口状态'],['接口简要','查看接口简要信息'],['接口计数','查看接口计数器/流量统计'],
-        ['路由表','查看路由表'],['ARP 表','查看 ARP 表'],['MAC 地址表','查看 MAC 地址表'],
-        ['LLDP 邻居','查看 LLDP 邻居'],['CDP 邻居','查看 CDP 邻居'],['STP 状态','查看 STP 生成树状态'],
-        ['设备信息','查看设备基本信息'],['版本信息','查看设备版本'],['系统时间','查看系统时间'],
-        ['CPU 利用率','查看 CPU 利用率'],['内存使用','查看内存使用率'],['日志','查看最近日志'],
-        ['告警信息','查看告警信息'],['环境温度','查看设备温度/环境信息'],
-        ['风扇状态','查看风扇状态'],['电源状态','查看电源状态'],
-        ['NAT 会话','查看 NAT 会话表'],['OSPF 邻居','查看 OSPF 邻居'],['BGP 邻居','查看 BGP 邻居'],
+        {label:'设备信息', cmd:'display version', icon:'📋'},
+        {label:'CPU利用率', cmd:'display cpu-usage', icon:'🖥️'},
+        {label:'内存使用率', cmd:'display memory', icon:'💾'},
+        {label:'系统时间', cmd:'display clock', icon:'🕐'},
+        {label:'系统温度', cmd:'display environment', icon:'🌡️'},
+        {label:'设备状态', cmd:'display device', icon:'📊'},
+        {label:'当前配置', cmd:'display current-configuration', icon:'📝'},
       ];
-      let h = `<div class="cfg-grid">`;
-      btns.forEach(b => { h += `<button class="btn" onclick="quickQuery('${dev}','${b[1]}')">${b[0]}</button>`; });
-      h += `</div>`;
-      h += `<div style="margin-top:8px;"><button class="config-exec-btn" style="background:#064e3b;" onclick="collectDeviceFacts('${dev}');addMsg('system','✅ 状态已采集');">🔄 采集设备状态</button></div>`;
-      h += `<div id="cfg-query-result" class="config-result" style="display:none;"></div>`;
-      return h;
+      return '<div style="margin:8px 0;color:#94a3b8;font-size:11px;">设备基本信息与状态</div><div class="cfg-grid">' +
+        btns.map(b => '<button class="btn" onclick="quickQuery(\''+dev+'\',\''+b.cmd+'\')">'+b.icon+' '+b.label+'</button>').join('') + '</div>';
     }
 
-    // ===== Tab: VLAN =====
-    function buildTabVlan(dev) {
-      return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">创建 / 删除 VLAN</h4>
-          <div class="form-group"><label>操作</label><select id="cfg-vlan-action"><option value="create">创建</option><option value="delete">删除</option></select></div>
-          <div class="form-group"><label>VLAN ID</label><input id="cfg-vlan-id" placeholder="10 或 10,20,30"></div>
-          <div class="form-group"><label>VLAN 名称</label><input id="cfg-vlan-name" placeholder="财务部"></div>
-          <div class="form-group"><label>VLAN 描述（可选）</label><input id="cfg-vlan-desc" placeholder="描述信息"></div>
-          <button class="config-exec-btn" onclick="execForm('vlan','${dev}')">执行</button>
-          <div id="cfg-vlan-result" class="config-result" style="display:none;"></div>
-        </div>
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">批量 VLAN</h4>
-          <div class="form-group"><label>批量创建（每行一个：VLAN ID 名称）</label><textarea id="cfg-vlan-batch" rows="6" style="width:100%;background:#0b1220;color:#e5e7eb;border:1px solid #334155;border-radius:6px;padding:6px;font-size:12px;" placeholder="10 财务部&#10;20 人事部&#10;30 技术部"></textarea></div>
-          <button class="config-exec-btn" onclick="execBatchVlan('${dev}')">批量创建</button>
-          <div id="cfg-vlan-batch-result" class="config-result" style="display:none;"></div>
-        </div>
-      </div>`;
-    }
-
-    // ===== Tab: 接口 =====
     function buildTabInterface(dev) {
-      return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">接口操作</h4>
-          <div class="form-group"><label>接口</label><input id="cfg-if-port" placeholder="GE0/0/1 或范围 1-4"></div>
-          <div class="form-group"><label>操作</label>
-            <select id="cfg-if-action"><option value="desc">设置描述</option><option value="shutdown">关闭</option><option value="noshutdown">开启</option><option value="speed">设置速率</option><option value="duplex">设置双工</option></select>
-          </div>
-          <div class="form-group"><label>参数值</label><input id="cfg-if-val" placeholder="描述文字 / 速率 / 双工模式"></div>
-          <button class="config-exec-btn" onclick="execForm('interface','${dev}')">执行</button>
-          <div id="cfg-if-result" class="config-result" style="display:none;"></div>
-        </div>
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">批量操作</h4>
-          <div class="form-group"><label>接口范围</label><input id="cfg-if-range" placeholder="GE0/0/1 到 GE0/0/24"></div>
-          <div class="form-group"><label>批量操作</label>
-            <select id="cfg-if-batch-action"><option value="shutdown">批量关闭</option><option value="noshutdown">批量开启</option><option value="desc">批量设置描述</option></select>
-          </div>
-          <div class="form-group"><label>描述（可选）</label><input id="cfg-if-batch-desc" placeholder="统一描述"></div>
-          <button class="config-exec-btn" onclick="execForm('interface-batch','${dev}')">批量执行</button>
-          <div id="cfg-if-batch-result" class="config-result" style="display:none;"></div>
-        </div>
-      </div>`;
+      return '<div style="margin:8px 0;color:#94a3b8;font-size:11px;">接口查看与配置</div>' +
+        '<div class="cfg-grid">' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display interface brief\')">📊 接口概览</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display interface\')">📋 接口详情</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display link-aggregation summary\')">🔗 聚合口</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'查看接口利用率\')">📈 利用率</button>' +
+        '</div>' +
+        '<div style="margin:12px 0 6px;color:#64748b;font-size:10px;">快捷配置</div>' +
+        '<div class="cfg-grid">' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display interface brief\')">🔒 先查接口状态</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'开启接口\',\'请输入要开启的接口，如 GE1/0/1 GE1/0/2\')">🔓 开启接口</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'关闭接口\',\'请输入要关闭的接口，如 GE1/0/3\')">🔒 关闭接口</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'设置接口描述\',\'请输入接口和描述，如 GE1/0/1 连接财务部\')">✏️ 接口描述</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'配置Access口\',\'请输入接口和VLAN，如 GE1/0/1 VLAN 10\')">🔌 Access口</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'配置Trunk口\',\'请输入接口和允许的VLAN，如 GE1/0/1 VLAN 10,20,30\')">🔗 Trunk口</button>' +
+        '</div>';
     }
 
-    // ===== Tab: 端口模式 =====
-    function buildTabPortMode(dev) {
-      return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">Access / Trunk</h4>
-          <div class="form-group"><label>接口</label><input id="cfg-pm-port" placeholder="GE0/0/1"></div>
-          <div class="form-group"><label>模式</label><select id="cfg-pm-mode"><option value="access">Access</option><option value="trunk">Trunk</option></select></div>
-          <div class="form-group"><label>VLAN ID</label><input id="cfg-pm-vlan" placeholder="Access 填 VLAN ID"></div>
-          <div class="form-group"><label>允许 VLAN（Trunk）</label><input id="cfg-pm-allow" placeholder="10,20,30 或 all"></div>
-          <div class="form-group"><label>Native VLAN（Trunk，可选）</label><input id="cfg-pm-native" placeholder="默认 VLAN"></div>
-          <button class="config-exec-btn" onclick="execForm('portmode','${dev}')">执行</button>
-          <div id="cfg-pm-result" class="config-result" style="display:none;"></div>
-        </div>
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">端口聚合 / 镜像</h4>
-          <div class="form-group"><label>类型</label><select id="cfg-pm-special"><option value="agg-lacp">聚合(LACP)</option><option value="agg-static">聚合(静态)</option><option value="mirror-src">镜像源</option><option value="mirror-dst">镜像目的</option></select></div>
-          <div class="form-group"><label>接口</label><input id="cfg-pm-sp-port" placeholder="GE0/0/1,GE0/0/2"></div>
-          <div class="form-group"><label>聚合组/会话号</label><input id="cfg-pm-sp-group" placeholder="1"></div>
-          <button class="config-exec-btn" onclick="execForm('portspecial','${dev}')">执行</button>
-          <div id="cfg-pm-sp-result" class="config-result" style="display:none;"></div>
-        </div>
-      </div>`;
+    function buildTabLayer2(dev) {
+      return '<div style="margin:8px 0;color:#94a3b8;font-size:11px;">VLAN 与二层配置</div>' +
+        '<div style="margin-bottom:6px;color:#64748b;font-size:10px;">查看</div>' +
+        '<div class="cfg-grid">' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display vlan brief\')">📊 VLAN概览</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display vlan all\')">📋 VLAN详情</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display mac-address\')">📋 MAC表</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display mac-address aging-time\')">⏱️ MAC老化</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display stp brief\')">🌳 STP状态</button>' +
+        '</div>' +
+        '<div style="margin:12px 0 6px;color:#64748b;font-size:10px;">配置</div>' +
+        '<div class="cfg-grid">' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'创建VLAN\',\'请输入VLAN号和名称，如 10 财务部\')">➕ 创建VLAN</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'删除VLAN\',\'请输入要删除的VLAN号，如 10\')">🗑️ 删除VLAN</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'配置端口隔离\',\'请输入要隔离的接口，如 GE1/0/1 GE1/0/2\')">🔒 端口隔离</button>' +
+        '</div>';
     }
 
-    // ===== Tab: L3 路由 =====
     function buildTabL3(dev) {
-      return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">SVI / 接口 IP</h4>
-          <div class="form-group"><label>类型</label><select id="cfg-l3-iftype"><option value="svi">VLAN 接口</option><option value="phy">物理接口 IP</option><option value="loopback">Loopback</option></select></div>
-          <div class="form-group"><label>接口/VLAN</label><input id="cfg-l3-iface" placeholder="VLAN 10 或 GE0/0/1"></div>
-          <div class="form-group"><label>IP 地址</label><input id="cfg-l3-ip" placeholder="192.168.10.1/24"></div>
-          <button class="config-exec-btn" onclick="execForm('l3-if','${dev}')">执行</button>
-          <div id="cfg-l3-if-result" class="config-result" style="display:none;"></div>
-        </div>
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">静态路由</h4>
-          <div class="form-group"><label>目标网段</label><input id="cfg-l3-rt-dst" placeholder="0.0.0.0/0"></div>
-          <div class="form-group"><label>下一跳 / 出接口</label><input id="cfg-l3-rt-nh" placeholder="10.0.0.2 或 GE0/0/1"></div>
-          <div class="form-group"><label>优先级（可选）</label><input id="cfg-l3-rt-pref" placeholder="默认 60"></div>
-          <button class="config-exec-btn" onclick="execForm('l3-route','${dev}')">执行</button>
-          <div id="cfg-l3-rt-result" class="config-result" style="display:none;"></div>
-        </div>
-      </div>
-      <div style="margin-top:8px;">
-        <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">动态路由协议</h4>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
-          <div>
-            <h5 style="color:#94a3b8;font-size:12px;">OSPF</h5>
-            <div class="form-group"><label>进程号</label><input id="cfg-l3-ospf-id" placeholder="1"></div>
-            <div class="form-group"><label>宣告网段</label><input id="cfg-l3-ospf-net" placeholder="192.168.0.0/16 area 0"></div>
-            <button class="config-exec-btn" onclick="execForm('l3-ospf','${dev}')">配置 OSPF</button>
-            <div id="cfg-l3-ospf-result" class="config-result" style="display:none;"></div>
-          </div>
-          <div>
-            <h5 style="color:#94a3b8;font-size:12px;">BGP</h5>
-            <div class="form-group"><label>AS 号</label><input id="cfg-l3-bgp-as" placeholder="65000"></div>
-            <div class="form-group"><label>邻居</label><input id="cfg-l3-bgp-nbr" placeholder="10.0.0.2 AS 65001"></div>
-            <button class="config-exec-btn" onclick="execForm('l3-bgp','${dev}')">配置 BGP</button>
-            <div id="cfg-l3-bgp-result" class="config-result" style="display:none;"></div>
-          </div>
-          <div>
-            <h5 style="color:#94a3b8;font-size:12px;">DHCP</h5>
-            <div class="form-group"><label>地址池名</label><input id="cfg-l3-dhcp-pool" placeholder="pool1"></div>
-            <div class="form-group"><label>网段/网关</label><input id="cfg-l3-dhcp-net" placeholder="192.168.1.0/24 GW 192.168.1.1"></div>
-            <button class="config-exec-btn" onclick="execForm('l3-dhcp','${dev}')">配置 DHCP</button>
-            <div id="cfg-l3-dhcp-result" class="config-result" style="display:none;"></div>
-          </div>
-        </div>
-      </div>`;
+      return '<div style="margin:8px 0;color:#94a3b8;font-size:11px;">三层路由与策略</div>' +
+        '<div style="margin-bottom:6px;color:#64748b;font-size:10px;">查看</div>' +
+        '<div class="cfg-grid">' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display ip routing-table\')">📊 路由表</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display ospf peer\')">🤝 OSPF邻居</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display ospf lsdb\')">📋 OSPF LSDB</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display bgp peer\')">🌐 BGP邻居</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display arp\')">📋 ARP表</button>' +
+        '</div>' +
+        '<div style="margin:12px 0 6px;color:#64748b;font-size:10px;">配置</div>' +
+        '<div class="cfg-grid">' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'配置静态路由\',\'请输入目的网段和下一跳，如 192.168.10.0/24 10.0.0.1\')">➕ 静态路由</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'删除静态路由\',\'请输入要删除的目的网段，如 192.168.10.0/24\')">🗑️ 删除路由</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'配置NAT\',\'请输入NAT配置，如 内网192.168.1.0/24 外网接口GE0/0/0\')">🔄 NAT配置</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'配置DHCP\',\'请输入DHCP配置，如 VLAN10 192.168.10.0/24 网关192.168.10.1\')">📡 DHCP配置</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'配置ACL\',\'请输入ACL规则，如 允许192.168.1.0/24访问10.0.0.1\')">🛡️ ACL配置</button>' +
+        '</div>';
     }
 
-    // ===== Tab: 安全策略 =====
-    function buildTabSecurity(dev) {
-      return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">ACL / 过滤</h4>
-          <div class="form-group"><label>操作</label><select id="cfg-sec-acl-act"><option value="create">创建</option><option value="delete">删除</option></select></div>
-          <div class="form-group"><label>规则编号</label><input id="cfg-sec-acl-id" placeholder="10"></div>
-          <div class="form-group"><label>动作</label><select id="cfg-sec-acl-perm"><option value="permit">permit</option><option value="deny">deny</option></select></div>
-          <div class="form-group"><label>源</label><input id="cfg-sec-acl-src" placeholder="192.168.1.0/24"></div>
-          <div class="form-group"><label>目标</label><input id="cfg-sec-acl-dst" placeholder="any"></div>
-          <div class="form-group"><label>协议/端口（可选）</label><input id="cfg-sec-acl-proto" placeholder="tcp eq 80"></div>
-          <div class="form-group"><label>应用到接口</label><input id="cfg-sec-acl-if" placeholder="GE0/0/1 inbound"></div>
-          <button class="config-exec-btn" onclick="execForm('acl','${dev}')">执行</button>
-          <div id="cfg-sec-acl-result" class="config-result" style="display:none;"></div>
-        </div>
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">NAT</h4>
-          <div class="form-group"><label>类型</label><select id="cfg-sec-nat-type"><option value="snat">源 NAT(SNAT/PAT)</option><option value="dnat">目的 NAT(DNAT)</option></select></div>
-          <div class="form-group"><label>源/内部地址</label><input id="cfg-sec-nat-src" placeholder="192.168.1.0/24"></div>
-          <div class="form-group"><label>外部接口/IP</label><input id="cfg-sec-nat-ext" placeholder="GE0/0/1 或 202.1.1.1"></div>
-          <div class="form-group"><label>端口映射（DNAT）</label><input id="cfg-sec-nat-port" placeholder="8080→80"></div>
-          <button class="config-exec-btn" onclick="execForm('nat','${dev}')">执行</button>
-          <div id="cfg-sec-nat-result" class="config-result" style="display:none;"></div>
-          <h4 style="color:#67e8f9;font-size:13px;margin:12px 0 6px;">安全域/Zone</h4>
-          <div class="form-group"><label>操作</label><select id="cfg-sec-zone-act"><option value="create">创建安全域</option><option value="addif">添加接口</option><option value="policy">域间策略</option></select></div>
-          <div class="form-group"><label>域名</label><input id="cfg-sec-zone-name" placeholder="Trust"></div>
-          <div class="form-group"><label>接口/策略</label><input id="cfg-sec-zone-val" placeholder="GE0/0/1 或策略描述"></div>
-          <button class="config-exec-btn" onclick="execForm('zone','${dev}')">执行</button>
-          <div id="cfg-sec-zone-result" class="config-result" style="display:none;"></div>
-        </div>
-      </div>`;
-    }
-
-    // ===== Tab: 系统 =====
     function buildTabSystem(dev) {
-      return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">设备管理</h4>
-          <div class="form-group"><label>设备名称</label><input id="cfg-sys-name" placeholder="SW-Core-01"></div>
-          <button class="config-exec-btn" onclick="execForm('sys-name','${dev}')">设置名称</button>
-          <div class="form-group" style="margin-top:8px;"><label>管理 IP / 网关</label><input id="cfg-sys-mgmt" placeholder="192.168.1.1/24 GW 192.168.1.254"></div>
-          <button class="config-exec-btn" onclick="execForm('sys-mgmt','${dev}')">设置管理 IP</button>
-          <div id="cfg-sys-basic-result" class="config-result" style="display:none;"></div>
-        </div>
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">密码 / 远程</h4>
-          <div class="form-group"><label>操作</label>
-            <select id="cfg-sys-sec-act"><option value="passwd">设置 Console 密码</option><option value="ssh">启用 SSH</option><option value="telnet">启用 Telnet</option><option value="acl-remote">限制远程访问 IP</option></select>
-          </div>
-          <div class="form-group"><label>参数</label><input id="cfg-sys-sec-val" placeholder="密码 / ACL / IP 列表"></div>
-          <button class="config-exec-btn" onclick="execForm('sys-sec','${dev}')">执行</button>
-          <div id="cfg-sys-sec-result" class="config-result" style="display:none;"></div>
-        </div>
-      </div>
-      <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-        <button class="config-exec-btn" style="background:#065f46;" onclick="quickQuery('${dev}','保存配置')">💾 保存配置</button>
-        <button class="config-exec-btn" style="background:#7c2d12;" onclick="quickQuery('${dev}','查看当前配置和启动配置差异')">⚠ 查看配置差异</button>
-        <button class="config-exec-btn" style="background:#1e293b;" onclick="quickQuery('${dev}','导出当前配置')">📤 导出配置</button>
-      </div>`;
+      return '<div style="margin:8px 0;color:#94a3b8;font-size:11px;">系统管理与维护</div>' +
+        '<div style="margin-bottom:6px;color:#64748b;font-size:10px;">查看</div>' +
+        '<div class="cfg-grid">' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display current-configuration\')">📋 当前配置</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display saved-configuration\')">💾 已保存配置</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display logbuffer\')">📋 系统日志</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display alarm\')">⚠️ 告警信息</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display users\')">👥 在线用户</button>' +
+        '</div>' +
+        '<div style="margin:12px 0 6px;color:#64748b;font-size:10px;">操作</div>' +
+        '<div class="cfg-grid">' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'save\')">💾 保存配置</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'配置SSH\',\'请输入SSH配置，如 开启SSHv2 端口22\')">🔑 SSH配置</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'配置SNMP\',\'请输入SNMP配置，如 开启SNMPv2c community public\')">📊 SNMP配置</button>' +
+        '</div>';
     }
 
-    // ===== Tab: 诊断 =====
     function buildTabDiag(dev) {
-      return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">连通性测试</h4>
-          <div class="form-group"><label>目标 IP</label><input id="cfg-dg-ping" placeholder="192.168.1.1"></div>
-          <div class="form-group"><label>次数</label><input id="cfg-dg-ping-c" placeholder="5" value="5"></div>
-          <button class="config-exec-btn" onclick="execForm('ping','${dev}')">Ping</button>
-          <div id="cfg-dg-ping-result" class="config-result" style="display:none;"></div>
-          <div class="form-group" style="margin-top:8px;"><label>Traceroute 目标</label><input id="cfg-dg-trace" placeholder="10.0.0.1"></div>
-          <button class="config-exec-btn" onclick="execForm('traceroute','${dev}')">Traceroute</button>
-          <div id="cfg-dg-trace-result" class="config-result" style="display:none;"></div>
-        </div>
-        <div>
-          <h4 style="color:#67e8f9;font-size:13px;margin-bottom:6px;">诊断工具</h4>
-          <div class="cfg-grid">
-            <button class="btn" onclick="quickQuery('${dev}','诊断 VLAN 配置问题')">诊断 VLAN</button>
-            <button class="btn" onclick="quickQuery('${dev}','诊断接口故障')">诊断接口</button>
-            <button class="btn" onclick="quickQuery('${dev}','诊断路由问题')">诊断路由</button>
-            <button class="btn" onclick="quickQuery('${dev}','诊断 ARP 问题')">诊断 ARP</button>
-            <button class="btn" onclick="quickQuery('${dev}','诊断 STP 问题')">诊断 STP</button>
-            <button class="btn" onclick="quickQuery('${dev}','诊断 ACL 是否生效')">诊断 ACL</button>
-            <button class="btn" onclick="quickQuery('${dev}','诊断 NAT 问题')">诊断 NAT</button>
-            <button class="btn" onclick="quickQuery('${dev}','诊断 OSPF 邻居关系')">诊断 OSPF</button>
-            <button class="btn" onclick="quickQuery('${dev}','诊断 BGP 问题')">诊断 BGP</button>
-            <button class="btn" onclick="quickQuery('${dev}','综合健康检查')">综合检查</button>
-          </div>
-          <div id="cfg-dg-tool-result" class="config-result" style="display:none;"></div>
-        </div>
-      </div>`;
+      return '<div style="margin:8px 0;color:#94a3b8;font-size:11px;">网络排错工具</div>' +
+        '<div style="margin-bottom:8px;">' +
+        '<button class="btn" style="width:100%;background:#1d4ed8;color:#fff;font-weight:600;padding:10px;" onclick="fullDiagnose(\''+dev+'\')">🔍 一键全面诊断</button>' +
+        '</div>' +
+        '<div style="margin-bottom:6px;color:#64748b;font-size:10px;">连通性测试</div>' +
+        '<div class="cfg-grid">' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'ping\',\'请输入目标IP，如 192.168.1.1\')">🏓 Ping测试</button>' +
+        '<button class="btn" onclick="promptConfig(\''+dev+'\',\'traceroute\',\'请输入目标IP，如 192.168.1.1\')">🔍 Traceroute</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display arp\')">📋 ARP表</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display mac-address\')">📋 MAC表</button>' +
+        '</div>' +
+        '<div style="margin:10px 0 6px;color:#64748b;font-size:10px;">协议诊断</div>' +
+        '<div class="cfg-grid">' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'诊断VLAN\')">🔍 VLAN诊断</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'诊断路由\')">🔍 路由诊断</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'诊断连通性\')">🔍 连通性诊断</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display lldp neighbor-information list\')">🤝 LLDP邻居</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display interface brief\')">🔌 接口状态</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display cpu-usage\')">🖥️ CPU使用率</button>' +
+        '</div>' +
+        '<div style="margin:10px 0 6px;color:#64748b;font-size:10px;">日志与告警</div>' +
+        '<div class="cfg-grid">' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display logbuffer\')">📋 系统日志</button>' +
+        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display alarm\')">⚠️ 告警信息</button>' +
+        '</div>';
     }
 
     // ===== 统一执行 =====
@@ -1600,6 +1554,29 @@
       }
     }
 
+    function promptConfig(dev, action, placeholder) {
+      // 在配置面板底部显示内联输入框
+      let box = document.getElementById('cfg-prompt-box');
+      if (!box) {
+        box = document.createElement('div');
+        box.id = 'cfg-prompt-box';
+        box.style.cssText = 'position:sticky;bottom:0;background:#0f172a;border-top:1px solid #1e293b;padding:10px;margin-top:8px;';
+        const panel = document.getElementById('config-panel');
+        if (panel) panel.appendChild(box);
+      }
+      box.innerHTML = `
+        <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">${action}</div>
+        <div style="display:flex;gap:6px;">
+          <input id="cfg-prompt-input" type="text" placeholder="${placeholder}" style="flex:1;background:#1e293b;border:1px solid #334155;color:#e5e7eb;padding:6px 10px;border-radius:4px;font-size:12px;outline:none;" onkeydown="if(event.key==='Enter')document.getElementById('cfg-prompt-ok').click()" autofocus />
+          <button id="cfg-prompt-ok" class="btn" style="background:#1d4ed8;color:#fff;padding:6px 14px;white-space:nowrap;" onclick="
+            const v=document.getElementById('cfg-prompt-input').value.trim();
+            if(v){document.getElementById('cfg-prompt-box').innerHTML='';quickQuery('${dev}','${action} '+v+' on ${dev}');}
+          ">执行</button>
+          <button class="btn" style="padding:6px 10px;" onclick="document.getElementById('cfg-prompt-box').innerHTML=''">取消</button>
+        </div>`;
+      setTimeout(() => { const inp = document.getElementById('cfg-prompt-input'); if(inp) inp.focus(); }, 50);
+    }
+
     async function quickQuery(device, msg) {
       const el = document.getElementById('cfg-query-result') || document.getElementById('cfg-dg-tool-result');
       if(el){el.style.display='block';el.className='config-result';el.textContent='⏳ 查询中...';}
@@ -1683,3 +1660,7 @@
   </script>
 </body>
 </html>
+
+
+
+

@@ -31,24 +31,33 @@ class NetOpsTools:
         if vendor not in ('h3c', 'huawei'):
             return
         try:
-            for _ in range(5):
+            for _ in range(3):
                 conn.write_channel('\x03')
-                time.sleep(2)
+                time.sleep(1)
                 buf = conn.read_channel()
                 if '<' in buf or '[' in buf or 'aborted' in buf.lower():
                     break
             conn.write_channel('\n')
-            time.sleep(2)
+            time.sleep(1)
             conn.read_channel()
         except Exception:
             pass
 
     def execute_tool(self, tool_name, arguments):
         """执行工具调用"""
-        if tool_name == "list_devices":
+        if tool_name == "run_commands":
+            device_name = arguments.get("device", "")
+            commands = arguments.get("commands", [])
+            device = self._find_device(device_name)
+            if not device:
+                return {"success": False, "error": f"找不到设备 '{device_name}'，请用 list_devices 查看可用设备"}
+            conn_type = device.get('conn_type', 'ssh')
+            if conn_type == 'telnet':
+                return self._telnet_connect(device_name, commands)
+            else:
+                return self._ssh_connect(device_name, commands)
+        elif tool_name == "list_devices":
             return self._list_devices()
-        elif tool_name == "get_device_info":
-            return self._get_device_info(arguments.get("device", ""))
         elif tool_name == "ssh_connect":
             return self._ssh_connect(
                 arguments.get("device", ""),
@@ -59,12 +68,8 @@ class NetOpsTools:
                 arguments.get("device", ""),
                 arguments.get("commands", [])
             )
-        elif tool_name == "serial_connect":
-            return self._serial_connect(
-                arguments.get("port", "COM1"),
-                arguments.get("baud", 9600),
-                arguments.get("commands", [])
-            )
+        elif tool_name == "get_device_info":
+            return self._get_device_info(arguments.get("device", ""))
         else:
             return {"success": False, "error": f"未知工具: {tool_name}"}
 
@@ -124,20 +129,23 @@ class NetOpsTools:
         """在设备上执行单条命令，自动处理系统视图"""
         # 需要系统视图的配置命令
         sys_view_keywords = [
-            'lldp enable', 'lldp disable', 'interface ', 'vlan ',
+            'lldp enable', 'lldp disable', 'lldp global',
+            'interface ', 'vlan ', 'port ', 'undo ',
             'ospf', 'bgp', 'acl ', 'ssh server', 'telnet server',
             'ip route', 'ip address', 'dhcp ', 'nat ', 'security-zone',
             'password', 'local-user', 'radius', 'hostname',
+            'stp ', 'mac-address', 'description', 'shutdown', 'undo shutdown',
+            'save', 'quit',
         ]
         need_sys_view = any(cmd.strip().lower().startswith(k) for k in sys_view_keywords)
 
         if need_sys_view:
             conn.write_channel('system-view\n')
-            time.sleep(2)
+            time.sleep(1)
             conn.read_channel()
 
         conn.write_channel(cmd + '\n')
-        time.sleep(5)
+        time.sleep(3)
         output = conn.read_channel()
 
         # 如果输出还在自动配置，跳过再执行一次
@@ -145,15 +153,15 @@ class NetOpsTools:
             self._skip_auto_config(conn, vendor)
             if need_sys_view:
                 conn.write_channel('system-view\n')
-                time.sleep(2)
+                time.sleep(1)
                 conn.read_channel()
             conn.write_channel(cmd + '\n')
-            time.sleep(5)
+            time.sleep(3)
             output = conn.read_channel()
 
         if need_sys_view:
             conn.write_channel('return\n')
-            time.sleep(1)
+            time.sleep(0.5)
             conn.read_channel()
 
         # 清理回显
@@ -298,28 +306,17 @@ def get_tools_definition():
         {
             "type": "function",
             "function": {
-                "name": "ssh_connect",
-                "description": "SSH连接到网络设备执行命令",
+                "name": "run_commands",
+                "description": "登录网络设备执行命令。自动根据设备的连接类型（SSH/Telnet）选择连接方式，你不需要关心连接方式。支持查询命令和配置命令，配置命令会自动进入配置模式。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "device": {"type": "string", "description": "设备备注名或IP"},
-                        "commands": {"type": "array", "items": {"type": "string"}, "description": "要执行的命令列表"}
-                    },
-                    "required": ["device", "commands"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "telnet_connect",
-                "description": "Telnet连接到网络设备执行命令",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "device": {"type": "string", "description": "设备备注名或IP"},
-                        "commands": {"type": "array", "items": {"type": "string"}, "description": "要执行的命令列表"}
+                        "device": {"type": "string", "description": "设备备注名（如'核心交换机'、'接入交换机'、'出口路由'）或IP地址"},
+                        "commands": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "要执行的命令列表。不要写system-view/return/quit，系统自动处理。例如查看VLAN: [\"display vlan brief\"], 配置trunk口: [\"interface GigabitEthernet1/0/1\", \"port link-type trunk\", \"port trunk permit vlan all\"]"
+                        }
                     },
                     "required": ["device", "commands"]
                 }
@@ -329,25 +326,11 @@ def get_tools_definition():
             "type": "function",
             "function": {
                 "name": "list_devices",
-                "description": "列出所有已添加的设备",
+                "description": "列出所有已管理的网络设备及其基本信息",
                 "parameters": {
                     "type": "object",
                     "properties": {},
                     "required": []
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_device_info",
-                "description": "获取设备详细信息",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "device": {"type": "string", "description": "设备备注名或IP"}
-                    },
-                    "required": ["device"]
                 }
             }
         }

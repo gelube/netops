@@ -1,0 +1,31 @@
+Links: 2
+  核心交换机 GE1/0/1 -> 接入交换机 GE1/0/1
+  核心交换机 GE1/0/2 -> 出口路由 GE0/0/0
+
+Raw LLDP:
+
+=== 核心交换机 ===
+Chassis ID : * -- -- Nearest nontpmr bridge neighbor
+             # -- -- Nearest customer bridge neighbor
+             Default -- -- Nearest bridge neighbor
+Local Interface Chassis ID      Port ID                         System Name     
+GE1/0/1         b0f7-0ef3-0100  GigabitEthernet1/0/1            H3C
+GE1/0/2         b0f7-1ce7-0300  GigabitEthernet0/0/0            H3C
+<sw1>
+
+=== 接入交换机 ===
+Chassis ID : * -- -- Nearest nontpmr bridge neighbor
+             # -- -- Nearest customer bridge neighbor
+             Default -- -- Nearest bridge neighbor
+Local Interface Chassis ID      Port ID                         System Name     
+GE1/0/1         b0f7-114b-0200  GigabitEthernet1/0/1            sw1
+<H3C>
+
+=== 出口路由 ===
+Chassis ID : * -- -- Nearest nontpmr bridge neighbor
+             # -- -- Nearest customer bridge neighbor
+             Default -- -- Nearest bridge neighbor
+LocalIf         Nbr chassis ID  Nbr port ID                     Nbr system name 
+GE0/0/0         b0f7-114b-0200  GigabitEthernet1/0/2            sw1
+<H3C>
+
