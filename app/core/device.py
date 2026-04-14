@@ -8,11 +8,28 @@ from pydantic import BaseModel, Field
 
 class Vendor(str, Enum):
     """网络设备厂商"""
+    # 主流厂商
     HUAWEI = "huawei"
     H3C = "h3c"
     CISCO = "cisco"
     JUNIPER = "juniper"
     RUIJIE = "ruijie"
+    
+    # 扩展厂商
+    ARISTA = "arista"
+    DELL = "dell"
+    HP = "hp"
+    FORTINET = "fortinet"
+    PALOALTO = "paloalto"
+    MIKROTIK = "mikrotik"
+    UBNT = "ubiquiti"
+    ZTE = "zte"
+    ZYXEL = "zyxel"
+    TPLINK = "tplink"
+    HUAWEI_CLOUDENGINE = "huawei_ce"  # 华为数据中心交换机
+    CISCO_NXOS = "cisco_nxos"  # Cisco Nexus
+    CISCO_XR = "cisco_xr"  # Cisco IOS-XR
+    
     UNKNOWN = "unknown"
 
 

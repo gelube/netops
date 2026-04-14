@@ -135,22 +135,96 @@ Parameters: {parameters}
 返回 JSON 数组，每个元素是一条命令：
 ["command1", "command2", ...]
 
+## 厂商命令风格
+
+### 华为 (huawei)
+- 进入系统视图：system-view
+- 批量接口：interface range GE0/0/1 to GE0/0/4
+- VLAN 配置：port link-type access, port default vlan 10
+- 退出：quit
+
+### H3C (h3c)
+- 进入系统视图：system-view
+- 批量接口：interface range GigabitEthernet1/0/1 to GigabitEthernet1/0/4
+- VLAN 配置：port link-mode bridge, port access vlan 10
+- 退出：quit
+
+### 思科 (cisco)
+- 进入特权模式：enable, configure terminal
+- 批量接口：interface range GigabitEthernet0/1 - 4
+- VLAN 配置：switchport mode access, switchport access vlan 10
+- 退出：exit
+
+### 瞻博 (juniper)
+- 进入配置模式：configure
+- 批量接口：set interfaces ge-0/0/1 unit 0 family ethernet-switching vlan members 10
+- 提交：commit
+- 退出：exit
+
+### 锐捷 (ruijie)
+- 进入特权模式：enable, configure terminal
+- 类似思科风格
+
+### Arista (arista)
+- 类似思科风格，但使用 EOS 语法
+
+### 华为 CloudEngine (huawei_ce)
+- 数据中心交换机，使用 VRPV8 语法
+
+### Cisco Nexus (cisco_nxos)
+- NX-OS 语法，支持 VPC、FabricPath
+
 ## 示例
 
 Vendor: huawei
 Intent: config_vlan
 Parameters: {{"interfaces": ["GE0/0/1", "GE0/0/2", "GE0/0/3", "GE0/0/4"], "vlan": 10, "mode": "access"}}
-输出：["interface range GE0/0/1 to GE0/0/4", "port link-type access", "port default vlan 10", "quit"]
+输出：["system-view", "vlan batch 10", "interface range GE0/0/1 to GE0/0/4", "port link-type access", "port default vlan 10", "quit"]
 
 Vendor: cisco
 Intent: config_vlan
 Parameters: {{"interfaces": ["GigabitEthernet0/1", "GigabitEthernet0/2"], "vlan": 20, "mode": "access"}}
-输出：["interface range GigabitEthernet0/1 - 2", "switchport mode access", "switchport access vlan 20", "exit"]
+输出：["enable", "configure terminal", "vlan 20", "exit", "interface range GigabitEthernet0/1 - 2", "switchport mode access", "switchport access vlan 20", "end"]
+
+Vendor: h3c
+Intent: config_vlan
+Parameters: {{"interfaces": ["GigabitEthernet1/0/1", "GigabitEthernet1/0/2"], "vlan": 30, "mode": "access"}}
+输出：["system-view", "vlan 30", "quit", "interface range GigabitEthernet1/0/1 to GigabitEthernet1/0/2", "port link-mode bridge", "port access vlan 30", "quit"]
+
+Vendor: juniper
+Intent: config_vlan
+Parameters: {{"interfaces": ["ge-0/0/1", "ge-0/0/2"], "vlan": 40, "mode": "access"}}
+输出：["configure", "set vlans v40 vlan-id 40", "set interfaces ge-0/0/1 unit 0 family ethernet-switching vlan members v40", "set interfaces ge-0/0/2 unit 0 family ethernet-switching vlan members v40", "commit", "exit"]
 
 Vendor: huawei
 Intent: config_interface
 Parameters: {{"interface": "Vlanif10", "ip": "192.168.10.1", "mask": "255.255.255.0"}}
-输出：["interface Vlanif10", "ip address 192.168.10.1 255.255.255.0", "quit"]
+输出：["system-view", "interface Vlanif10", "ip address 192.168.10.1 255.255.255.0", "quit"]
+
+Vendor: cisco
+Intent: config_interface
+Parameters: {{"interface": "Vlan20", "ip": "192.168.20.1", "mask": "255.255.255.0"}}
+输出：["enable", "configure terminal", "interface Vlan20", "ip address 192.168.20.1 255.255.255.0", "no shutdown", "end"]
+
+Vendor: huawei
+Intent: config_routing
+Parameters: {{"type": "static", "dest": "0.0.0.0", "mask": "0.0.0.0", "next_hop": "192.168.1.1"}}
+输出：["system-view", "ip route-static 0.0.0.0 0.0.0.0 192.168.1.1", "quit"]
+
+Vendor: cisco
+Intent: config_routing
+Parameters: {{"type": "static", "dest": "10.0.0.0", "mask": "255.255.255.0", "next_hop": "192.168.1.254"}}
+输出：["enable", "configure terminal", "ip route 10.0.0.0 255.255.255.0 192.168.1.254", "end"]
+
+Vendor: huawei
+Intent: config_acl
+Parameters: {{"action": "block", "target_ip": "192.168.100.10"}}
+输出：["system-view", "acl number 3000", "rule deny ip source 192.168.100.10 0", "quit"]
+
+Vendor: cisco
+Intent: config_acl
+Parameters: {{"action": "block", "target_ip": "192.168.100.20"}}
+输出：["enable", "configure terminal", "access-list 100 deny ip host 192.168.100.20 any", "access-list 100 permit ip any any", "end"]
 """
 
 

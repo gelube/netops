@@ -41,6 +41,20 @@ class DeviceConnection:
         Vendor.CISCO: "cisco_ios",
         Vendor.JUNIPER: "juniper_junos",
         Vendor.RUIJIE: "ruijie_os",
+        # 扩展厂商
+        Vendor.ARISTA: "arista_eos",
+        Vendor.DELL: "dell_os10",
+        Vendor.HP: "hp_procurve",
+        Vendor.FORTINET: "fortinet",
+        Vendor.PALOALTO: "paloalto_panos",
+        Vendor.MIKROTIK: "mikrotik_routeros",
+        Vendor.UBNT: "ubiquiti_edgerouter",
+        Vendor.ZTE: "zte_zxros",
+        Vendor.ZYXEL: "zyxel_os",
+        Vendor.TPLINK: "tplink_jetstream",
+        Vendor.HUAWEI_CLOUDENGINE: "huawei_vrpv8",
+        Vendor.CISCO_NXOS: "cisco_nxos",
+        Vendor.CISCO_XR: "cisco_xr",
     }
     
     def __init__(self, conn_info: ConnectionInfo, timeout: int = 30):
