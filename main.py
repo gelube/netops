@@ -10,17 +10,18 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.ui import run_app
+from version import __version__
 
 
 def main():
     """主函数"""
-    print("""
+    print(f"""
 ╔══════════════════════════════════════════════════════════╗
 ║                                                          ║
 ║        NETOPS AI - 网络工程师智能助手                    ║
 ║        Network Engineer AI Assistant                     ║
 ║                                                          ║
-║                    Version 1.0.0                        ║
+║                    Version {__version__}                        ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
     """)

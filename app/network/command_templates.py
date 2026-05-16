@@ -492,22 +492,50 @@ class TemplateMatcher:
         
         return None
 
+    # 参数别名映射
+    _PARAM_ALIASES = {
+        "vlan_id": ["vlan", "vlanid", "vid"],
+        "interfaces": ["interface", "iface", "port"],
+        "next_hop": ["nexthop", "gateway", "gw"],
+        "target_ip": ["target", "ip", "src_ip"],
+    }
+
+    # 可选参数（缺失时模板有合理默认值）
+    _OPTIONAL_PARAMS = {"mode", "mask"}
+
+    # 关键参数（缺失会导致生成错误命令，如 0.0.0.0）
+    _CRITICAL_PARAMS = {"ip", "next_hop", "dest", "target_ip", "vlan_id"}
+
     @classmethod
     def _params_match(cls, template: CommandTemplate, parameters: Dict[str, Any]) -> bool:
-        """检查参数是否匹配模板需求"""
+        """检查参数是否匹配模板需求
+
+        规则：
+        - 可选参数缺失 → OK（模板有默认值）
+        - 别名匹配 → OK（vlan_id 匹配 vlan）
+        - 关键参数缺失 → FAIL（会生成 0.0.0.0 之类错误命令）
+        - 非关键参数缺失 → OK
+        """
         for key in template.param_keys:
-            # 检查参数是否存在（vlan_id 可以是 vlan 的别名）
-            if key in parameters:
+            if key in parameters and parameters[key]:
                 continue
-            if key == "vlan_id" and "vlan" in parameters:
+
+            # 别名检查
+            aliases = cls._PARAM_ALIASES.get(key, [])
+            if any(a in parameters and parameters[a] for a in aliases):
                 continue
-            if key == "mode" and template.intent_type == "config_vlan":
-                # mode参数可选，默认access
+
+            # 可选参数
+            if key in cls._OPTIONAL_PARAMS:
                 continue
-            if key == "mask" and key not in parameters:
-                # mask可选，模板会用默认值
-                continue
-            # 非关键参数缺失也可以，模板会用默认值
+
+            # 关键参数缺失 → 不匹配
+            if key in cls._CRITICAL_PARAMS:
+                return False
+
+            # 其他参数缺失 → 允许但记录警告
+            # （模板会用默认值，但如果模板默认值是 0.0.0.0 等占位符，
+            #   应该标记该参数为 _CRITICAL_PARAMS）
         return True
 
     @classmethod

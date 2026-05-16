@@ -10,26 +10,23 @@ flask>=2.3.0
 flask-socketio>=5.3.0
 python-socketio>=5.9.0
 eventlet>=0.33.0
+flask-cors>=4.0.0
 
 # 网络连接
 netmiko>=4.1.0
 paramiko>=3.0.0
-napalm>=4.1.0
-pysnmp>=4.4.12
 
 # LLM客户端
 openai>=1.0.0
-anthropic>=0.18.0
-
-# 本地模型
-ollama>=0.1.0
 
 # 工具
 aiohttp>=3.9.0
-asyncio-throttle>=1.0.2
 python-dotenv>=1.0.0
-keyring>=24.0.0
 
 # 可选 - 增强功能
-# pillow>=10.0.0  # 图片处理
-# aiofiles>=23.0.0  # 异步文件IO
+# anthropic>=0.18.0  # Anthropic Claude 支持
+# napalm>=4.1.0      # NAPALM 多厂商自动化
+# pysnmp>=4.4.12     # SNMP 支持
+# keyring>=24.0.0     # 系统密钥环存储
+# pillow>=10.0.0      # 图片处理
+# aiofiles>=23.0.0    # 异步文件IO

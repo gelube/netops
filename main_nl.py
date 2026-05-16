@@ -13,17 +13,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app.llm.config import LLMConfig, LLMClient
 from app.nl_router.executor import NLExecutor
 from app.credentials import get_credential_manager, DeviceCredential
+from version import __version__
 
 
 async def main():
     """主函数"""
-    print("""
+    print(f"""
 ╔══════════════════════════════════════════════════════════╗
 ║                                                          ║
 ║        NETOPS AI - 自然语言网络运维                      ║
 ║        Pure SSH Mode                                     ║
 ║                                                          ║
-║                    Version 2.0.0                        ║
+║                    Version {__version__}                        ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -37,12 +38,13 @@ async def main():
 
 """)
     
-    # 初始化 LLM 客户端
+    # 初始化 LLM 客户端 — 优先从环境变量读取配置
+    import os as _os
     llm_config = LLMConfig(
-        provider="openai",
-        endpoint="http://localhost:11434/v1",  # Ollama 本地模型
-        api_key="ollama",
-        model="qwen2.5:7b"
+        provider=_os.environ.get("NETOPS_LLM_PROVIDER", "openai"),
+        endpoint=_os.environ.get("NETOPS_LLM_ENDPOINT", "http://localhost:11434/v1"),
+        api_key=_os.environ.get("NETOPS_LLM_API_KEY", "ollama"),
+        model=_os.environ.get("NETOPS_LLM_MODEL", "qwen2.5:7b"),
     )
     
     llm_client = LLMClient(llm_config)
