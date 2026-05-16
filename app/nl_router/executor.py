@@ -231,13 +231,13 @@ class NLExecutor:
         username: str, 
         password: str,
     ) -> ExecutionResult:
-        """用户确认后执行配置（含自动备份）"""
+        """用户确认后执行配置 — 统一走 CommandService"""
         if not confirmed:
             return ExecutionResult(success=False, message="用户取消配置")
         
         device_ip = device_data.get("device_ip", "")
         commands = device_data.get("commands", [])
-        vendor = device_data.get("vendor", "")
+        vendor = device_data.get("vendor", "huawei")
         guard_result = device_data.get("guard_result")
         
         if not device_ip or not commands:
@@ -250,68 +250,37 @@ class NLExecutor:
                 message=f"安全检查未通过，{len(guard_result.blocked_commands)} 条命令被拦截，拒绝执行"
             )
         
-        from app.network.ssh import test_connection, DeviceConnection, ConnectionInfo
+        # 统一走 CommandService
+        from app.network.command_service import CommandService
+        dev_info = CommandService.device_from_dict(
+            {'ip': device_ip, 'vendor': vendor},
+            credentials={'username': username, 'password': password}
+        )
         
-        if not test_connection(device_ip):
-            return ExecutionResult(success=False, message=f"无法连接到设备 {device_ip}")
+        # 过滤被拦截的命令
+        if guard_result:
+            safe_commands = [r.command for r in guard_result.results if r.is_allowed]
+        else:
+            safe_commands = commands
         
-        try:
-            conn_info = ConnectionInfo(ip=device_ip, username=username, password=password)
-            
-            with DeviceConnection(conn_info) as conn:
-                # 如果有配置变更，先备份
-                backup = ConfigBackup(conn, vendor=vendor)
-                needs_backup = guard_result.requires_backup if guard_result else any(
-                    cmd.strip().lower() not in ('quit', 'exit', 'end', 'return', 'y')
-                    for cmd in commands
-                )
-                
-                backup_ok = False
-                if needs_backup:
-                    backup_ok = backup.backup()
-                    if not backup_ok:
-                        return ExecutionResult(
-                            success=False,
-                            message="⚠️ 配置备份失败，为安全起见取消执行。请检查设备连接和权限。"
-                        )
-                
-                # 过滤被拦截的命令
-                if guard_result:
-                    safe_commands = [
-                        r.command for r in guard_result.results 
-                        if r.is_allowed
-                    ]
-                else:
-                    safe_commands = commands
-                
-                # 执行命令
-                results = []
-                for cmd in safe_commands:
-                    try:
-                        output = conn.execute_command(cmd)
-                        results.append({"command": cmd, "output": output, "success": True})
-                    except Exception as e:
-                        results.append({"command": cmd, "output": str(e), "success": False})
-                        # 命令执行失败，停止后续命令
-                        break
-                
-                # 检查是否有失败的命令
-                failed = [r for r in results if not r["success"]]
-                if failed:
-                    return ExecutionResult(
-                        success=False,
-                        message=f"执行到第 {len(results)} 条命令时失败：{failed[0]['output']}\n\n💾 已备份配置，可手动回滚。",
-                        data={"results": results, "backup_available": backup_ok}
-                    )
-            
+        cmd_result = CommandService().execute(
+            dev_info, safe_commands,
+            source='confirmed',
+            auto_backup=True,
+        )
+        
+        if cmd_result.success:
             return ExecutionResult(
                 success=True,
-                message=f"配置执行成功（{len(results)} 条命令）" + ("，已备份原配置" if backup_ok else ""),
-                data={"results": results, "backup_available": backup_ok}
+                message=f"配置执行成功（{len(cmd_result.outputs)} 条命令）" + ("，已备份原配置" if cmd_result.backup_id else ""),
+                data={"results": cmd_result.outputs, "backup_available": bool(cmd_result.backup_id)}
             )
-        
-        except Exception as e:
-            return ExecutionResult(success=False, message=f"配置执行失败：{str(e)}")
+        else:
+            return ExecutionResult(
+                success=False,
+                message=f"执行失败：{cmd_result.error}",
+                data={"results": cmd_result.outputs, "backup_available": bool(cmd_result.backup_id)}
+            )
     
     def _execute_diagnosis(self, intent: ParsedIntent) -> ExecutionResult:
         """执行诊断工作流（基于 SSH）"""

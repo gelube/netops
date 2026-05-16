@@ -119,37 +119,43 @@ def _do_chat(message, selected_device, session_id='default'):
 
     # 处理工具调用
     if response.get('tool_calls'):
+        from app.network.command_service import CommandService
+        cmd_svc = CommandService()
         results = []
         for tc in response['tool_calls']:
             tool_name = tc.get('function', {}).get('name', '')
             arguments = json.loads(tc.get('function', {}).get('arguments', '{}'))
 
-            # 安全检查
+            # 命令类工具 → 统一走 CommandService
             if tool_name in ('run_commands', 'ssh_connect'):
-                from app.network.command_guard import CommandGuard
                 commands = arguments.get('commands', [])
                 if commands:
-                    device = None
+                    # 查找设备
+                    dev = None
                     for d in devices:
                         if d.get('name') == arguments.get('device') or d.get('remark') == arguments.get('device'):
-                            device = d
+                            dev = d
                             break
-                    vendor = device.get('vendor', 'huawei') if device else 'huawei'
-                    device_type_map = {'huawei': 'huawei', 'h3c': 'huawei', 'cisco': 'cisco_ios', 'juniper': 'juniper_junos'}
-                    try:
-                        guard = CommandGuard(vendor=device_type_map.get(vendor, 'huawei'))
-                        guard_result = guard.check_commands(commands)
-                        if guard_result.blocked_commands:
+                    if dev:
+                        dev_info = CommandService.device_from_dict(dev)
+                        cmd_result = cmd_svc.execute(dev_info, commands, user_id=session_id, source='llm')
+                        if not cmd_result.success:
                             results.append({
                                 'tool': tool_name,
-                                'error': f'安全检查未通过：{guard_result.blocked_commands}',
-                                'blocked': True,
+                                'error': cmd_result.error,
+                                'blocked': bool(cmd_result.blocked_commands),
                             })
                             continue
-                    except Exception as guard_err:
-                        # CommandGuard 不可用时跳过安全检查，继续执行
-                        pass
+                        # 转换 CommandService 结果为原格式
+                        tool_result = {
+                            'success': True,
+                            'results': cmd_result.outputs,
+                            'backup_id': cmd_result.backup_id,
+                        }
+                        results.append({'tool': tool_name, 'result': tool_result})
+                        continue
 
+            # 非命令类工具（如 get_devices）仍走 NetOpsTools
             tool_result = tools.execute_tool(tool_name, arguments)
             results.append({'tool': tool_name, 'result': tool_result})
 
@@ -187,7 +193,7 @@ def quick_config():
     if not device_name:
         return jsonify({'success': False, 'message': '请指定设备'})
 
-    # 查找设备厂商
+    # 查找设备
     devices = _load_devices()
     device = None
     for d in devices:
@@ -199,8 +205,7 @@ def quick_config():
         return jsonify({'success': False, 'message': f'设备 {device_name} 不存在'})
 
     vendor = device.get('vendor', 'huawei')
-    device_type_map = {'huawei': 'huawei', 'h3c': 'huawei', 'cisco': 'cisco_ios', 'juniper': 'juniper_junos'}
-    netmiko_type = device_type_map.get(vendor, 'huawei')
+    netmiko_type = {'huawei': 'huawei', 'h3c': 'huawei', 'cisco': 'cisco_ios', 'juniper': 'juniper_junos'}.get(vendor, 'huawei')
 
     # 1. 模板优先
     from app.network.command_templates import TemplateMatcher
@@ -211,22 +216,16 @@ def quick_config():
     )
 
     if template_commands:
-        # 安全检查
-        try:
-            from app.network.command_guard import CommandGuard
-            guard = CommandGuard(vendor=netmiko_type)
-            guard_result = guard.check_commands(template_commands)
-            if guard_result.blocked_commands:
-                return jsonify({
-                    'success': False,
-                    'message': '命令安全检查未通过',
-                    'blocked': guard_result.blocked_commands,
-                })
-            if guard_result.requires_backup:
-                parameters['_requires_backup'] = True
-        except Exception:
-            # CommandGuard 不可用时跳过安全检查
-            pass
+        # 统一安全检查
+        from app.network.command_service import CommandService
+        dev_info = CommandService.device_from_dict(device)
+        check = CommandService().check_only(dev_info, template_commands)
+        if not check.success:
+            return jsonify({
+                'success': False,
+                'message': '命令安全检查未通过',
+                'blocked': check.blocked_commands,
+            })
 
         return jsonify({
             'success': True,
@@ -276,7 +275,7 @@ def quick_config():
 
 @chat_bp.route('/api/diagnose', methods=['POST'])
 def api_diagnose():
-    """诊断接口"""
+    """诊断接口 — 统一走 CommandService"""
     data = request.json or {}
     device_name = data.get('device', '')
     diagnose_type = data.get('type', 'connectivity')
@@ -284,9 +283,7 @@ def api_diagnose():
     if not device_name:
         return jsonify({'success': False, 'message': '请指定设备'})
 
-    from netops_tools import NetOpsTools
-    tools = NetOpsTools(_devices_file)
-    devices = tools.load_devices()
+    devices = _load_devices()
     device = None
     for d in devices:
         if d.get('name') == device_name or d.get('remark') == device_name or d.get('ip') == device_name:
@@ -320,12 +317,22 @@ def api_diagnose():
     if diagnose_type == 'connectivity' and data.get('target'):
         commands[0] = f"{commands[0].strip()} {data['target']}"
 
-    result = tools.execute_tool('run_commands', {'device': device_name, 'commands': commands})
+    # 统一走 CommandService（含安全检查）
+    from app.network.command_service import CommandService
+    dev_info = CommandService.device_from_dict(device)
+    cmd_result = CommandService().execute(
+        dev_info, commands,
+        source='diagnosis',
+        skip_guard=True,   # 诊断命令都是只读查询，跳过 CommandGuard
+    )
 
-    if result.get('success'):
-        # 简单分析
-        analysis = _analyze_diagnosis(result.get('results', []), diagnose_type)
+    result = {'success': cmd_result.success}
+    if cmd_result.success:
+        result['results'] = cmd_result.outputs
+        analysis = _analyze_diagnosis(cmd_result.outputs, diagnose_type)
         result['analysis'] = analysis
+    else:
+        result['message'] = cmd_result.error
 
     return jsonify(result)
 
