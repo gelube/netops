@@ -324,6 +324,12 @@ class NLExecutor:
             return self._diagnose_routing(params)
         elif diagnosis_type == "diagnose_connectivity":
             return self._diagnose_connectivity(params)
+        elif diagnosis_type == "diagnose_stp":
+            return self._run_diagnosis("stp", params,
+                                       params.get("device_ip", ""), "", "")
+        elif diagnosis_type == "diagnose_interface":
+            return self._run_diagnosis("interface", params,
+                                        params.get("device_ip", ""), "", "")
         else:
             return ExecutionResult(success=False, message=f"未知诊断类型：{diagnosis_type}")
     

@@ -1,32 +1,35 @@
-# NetOps AI 依赖
+# NetOps AI ����
 
-# 核心
+# ����
 textual>=0.50.0
 pydantic>=2.0.0
 pyyaml>=6.0
 
-# Web框架
+# Web���
 flask>=2.3.0
 flask-socketio>=5.3.0
 python-socketio>=5.9.0
 eventlet>=0.33.0
 flask-cors>=4.0.0
 
-# 网络连接
+# ��������
 netmiko>=4.1.0
 paramiko>=3.0.0
 
-# LLM客户端
+# LLM�ͻ���
 openai>=1.0.0
 
-# 工具
+# ��ȫ
+cryptography>=41.0.0       # Fernet �ԳƼ��ܣ�ƾ֤�洢��
+
+# ����
 aiohttp>=3.9.0
 python-dotenv>=1.0.0
 
-# 可选 - 增强功能
-# anthropic>=0.18.0  # Anthropic Claude 支持
-# napalm>=4.1.0      # NAPALM 多厂商自动化
-# pysnmp>=4.4.12     # SNMP 支持
-# keyring>=24.0.0     # 系统密钥环存储
-# pillow>=10.0.0      # 图片处理
-# aiofiles>=23.0.0    # 异步文件IO
+# ��ѡ - ��ǿ����
+# anthropic>=0.18.0  # Anthropic Claude ֧��
+# napalm>=4.1.0      # NAPALM �೧���Զ���
+# pysnmp>=4.4.12     # SNMP ֧��
+# keyring>=24.0.0     # ϵͳ��Կ���洢
+# pillow>=10.0.0      # ͼƬ����
+# aiofiles>=23.0.0    # �첽�ļ�IO

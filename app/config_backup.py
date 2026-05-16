@@ -146,37 +146,90 @@ class ConfigBackupManager:
         backup2: ConfigBackup,
     ) -> Dict[str, Any]:
         """
-        比较两个备份的差异
-        
-        Args:
-            backup1: 备份 1
-            backup2: 备份 2
-        
-        Returns:
-            差异报告
+        比较两个备份的差异（段落级 + 行级）
+
+        先按段落（以缩进变化或空行分隔）对比，再细化到行级差异。
+        比纯 set diff 更结构化，适合网络配置的层级结构。
         """
-        # 加载配置内容
         config1 = self.restore_backup(backup1)
         config2 = self.restore_backup(backup2)
-        
-        lines1 = set(config1.split("\n"))
-        lines2 = set(config2.split("\n"))
-        
-        added = lines2 - lines1
-        removed = lines1 - lines2
-        
+
+        # 快速判断：hash 相同则完全一致
+        if backup1.config_hash == backup2.config_hash:
+            return {
+                "backup1": {"timestamp": backup1.timestamp, "hash": backup1.config_hash},
+                "backup2": {"timestamp": backup2.timestamp, "hash": backup2.config_hash},
+                "identical": True,
+                "total_changes": 0,
+                "sections": [],
+            }
+
+        # 段落分割：以空行或顶层命令（无缩进）为边界
+        def _split_sections(config: str) -> List[Dict[str, Any]]:
+            sections = []
+            current_header = "<global>"
+            current_lines = []
+            for line in config.split("\n"):
+                # 无缩进的行 = 段落头
+                if line and not line[0].isspace() and not line.startswith("!"):
+                    if current_lines:
+                        sections.append({"header": current_header, "lines": current_lines})
+                    current_header = line.strip()
+                    current_lines = [line]
+                elif line.strip() == "!" or line.strip() == "#":
+                    # 分隔符，结束当前段落
+                    if current_lines:
+                        sections.append({"header": current_header, "lines": current_lines})
+                        current_header = "<separator>"
+                        current_lines = []
+                else:
+                    current_lines.append(line)
+            if current_lines:
+                sections.append({"header": current_header, "lines": current_lines})
+            return sections
+
+        sections1 = _split_sections(config1)
+        sections2 = _split_sections(config2)
+
+        # 按 header 索引
+        s1_map = {s["header"]: s for s in sections1}
+        s2_map = {s["header"]: s for s in sections2}
+
+        all_headers = list(dict.fromkeys(
+            [s["header"] for s in sections1] + [s["header"] for s in sections2]
+        ))
+
+        diff_sections = []
+        for header in all_headers:
+            s1 = s1_map.get(header)
+            s2 = s2_map.get(header)
+
+            if s1 and not s2:
+                # 段落被删除
+                diff_sections.append({"header": header, "change": "removed", "lines": s1["lines"]})
+            elif s2 and not s1:
+                # 段落被添加
+                diff_sections.append({"header": header, "change": "added", "lines": s2["lines"]})
+            else:
+                # 段落都有，做行级对比
+                set1 = set(s1["lines"])
+                set2 = set(s2["lines"])
+                added = set2 - set1
+                removed = set1 - set2
+                if added or removed:
+                    diff_sections.append({
+                        "header": header,
+                        "change": "modified",
+                        "added_lines": sorted(added),
+                        "removed_lines": sorted(removed),
+                    })
+
         return {
-            "backup1": {
-                "timestamp": backup1.timestamp,
-                "hash": backup1.config_hash,
-            },
-            "backup2": {
-                "timestamp": backup2.timestamp,
-                "hash": backup2.config_hash,
-            },
-            "added_lines": list(added),
-            "removed_lines": list(removed),
-            "total_changes": len(added) + len(removed),
+            "backup1": {"timestamp": backup1.timestamp, "hash": backup1.config_hash},
+            "backup2": {"timestamp": backup2.timestamp, "hash": backup2.config_hash},
+            "identical": False,
+            "total_changes": len(diff_sections),
+            "sections": diff_sections,
         }
     
     def _add_to_index(self, backup: ConfigBackup) -> None:
