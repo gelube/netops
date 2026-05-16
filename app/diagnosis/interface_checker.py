@@ -15,7 +15,7 @@ class InterfaceChecker(BaseChecker):
         super().__init__(ssh_connection)
         self.llm = llm_client
 
-    async def diagnose(self, interface: str = "", symptom: str = "", **kwargs) -> DiagnosisResult:
+    def diagnose(self, interface: str = "", symptom: str = "", **kwargs) -> DiagnosisResult:
         """
         执行接口诊断
 

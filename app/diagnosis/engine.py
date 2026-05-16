@@ -36,7 +36,7 @@ class DiagnosisEngine:
         self.knowledge_base = KnowledgeBase()
         self.pusher = ProgressPusher() if ProgressPusher else None
     
-    async def diagnose(self, diagnosis_type: str, params: Dict[str, Any], 
+    def diagnose(self, diagnosis_type: str, params: Dict[str, Any], 
                        ssh_connection=None) -> DiagnosisResult:
         """
         执行诊断
@@ -67,23 +67,23 @@ class DiagnosisEngine:
         # 2. 执行诊断（原有逻辑）
         if diagnosis_type == "vlan":
             checker = VLANChecker(ssh_connection, self.llm_client)
-            result = await checker.diagnose(**params)
+            result = checker.diagnose(**params)
         
         elif diagnosis_type == "routing":
             checker = RoutingChecker(ssh_connection, self.llm_client)
-            result = await checker.diagnose(**params)
+            result = checker.diagnose(**params)
         
         elif diagnosis_type == "connectivity":
             checker = ConnectivityChecker(ssh_connection, self.llm_client)
-            result = await checker.diagnose(**params)
+            result = checker.diagnose(**params)
         
         elif diagnosis_type == "stp":
             checker = STPChecker(ssh_connection, self.llm_client)
-            result = await checker.diagnose(**params)
+            result = checker.diagnose(**params)
         
         elif diagnosis_type == "interface":
             checker = InterfaceChecker(ssh_connection, self.llm_client)
-            result = await checker.diagnose(**params)
+            result = checker.diagnose(**params)
         
         else:
             result = DiagnosisResult(
@@ -118,7 +118,7 @@ class DiagnosisEngine:
         
         return result
     
-    async def quick_diagnose(self, symptom: str, device_ip: str, 
+    def quick_diagnose(self, symptom: str, device_ip: str, 
                             username: str, password: str) -> DiagnosisResult:
         """
         快速诊断（自动判断类型）
@@ -153,7 +153,7 @@ class DiagnosisEngine:
         try:
             with DeviceConnection(conn_info) as conn:
                 # 执行诊断
-                result = await self.diagnose(
+                result = self.diagnose(
                     diagnosis_type=analysis["type"],
                     params=analysis["params"],
                     ssh_connection=conn

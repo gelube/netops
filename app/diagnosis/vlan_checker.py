@@ -15,7 +15,7 @@ class VLANChecker(BaseChecker):
         super().__init__(ssh_connection)
         self.llm = llm_client
     
-    async def diagnose(self, vlan_id: int = 0, symptom: str = "", 
+    def diagnose(self, vlan_id: int = 0, symptom: str = "", 
                       device_ip: str = "", **kwargs) -> DiagnosisResult:
         """
         执行VLAN诊断

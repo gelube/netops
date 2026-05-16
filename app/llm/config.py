@@ -7,6 +7,57 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from enum import Enum
 
+# Fernet 加密（与 credentials.py 共享密钥）
+try:
+    from cryptography.fernet import Fernet
+    _HAS_CRYPTO = True
+except ImportError:
+    _HAS_CRYPTO = False
+
+
+def _get_fernet() -> Optional['Fernet']:
+    """获取 Fernet 实例（密钥与 credentials.py 共享 ~/.netops/fernet.key）"""
+    if not _HAS_CRYPTO:
+        return None
+    key_path = os.path.join(os.path.expanduser('~'), '.netops', 'fernet.key')
+    if not os.path.exists(key_path):
+        return None
+    try:
+        with open(key_path, 'rb') as f:
+            key = f.read().strip()
+        return Fernet(key)
+    except Exception:
+        return None
+
+
+def _encrypt_api_key(api_key: str) -> str:
+    """加密 API Key，失败时返回原文并打印警告"""
+    if not api_key:
+        return ''
+    f = _get_fernet()
+    if f is None:
+        print('[WARN] Fernet 不可用，API Key 将明文存储')
+        return api_key
+    try:
+        return f.encrypt(api_key.encode()).decode()
+    except Exception:
+        print('[WARN] API Key 加密失败，将明文存储')
+        return api_key
+
+
+def _decrypt_api_key(encrypted: str) -> str:
+    """解密 API Key，失败时返回原文（可能是明文或损坏的密文）"""
+    if not encrypted:
+        return ''
+    f = _get_fernet()
+    if f is None:
+        return encrypted  # 无 Fernet，当明文处理
+    try:
+        return f.decrypt(encrypted.encode()).decode()
+    except Exception:
+        # 解密失败 = 明文存储的旧数据，直接返回
+        return encrypted
+
 
 class ProviderType(str, Enum):
     """Provider 类型"""
@@ -39,6 +90,7 @@ class LLMConfig(BaseModel):
             "provider": self.provider,
             "endpoint": self.endpoint,
             "model": self.model,
+            "api_key": _encrypt_api_key(self.api_key),
         }
         
         try:
@@ -66,6 +118,7 @@ class LLMConfig(BaseModel):
                         provider=data.get("provider", "openai"),
                         endpoint=data.get("endpoint", "https://api.openai.com/v1"),
                         model=data.get("model", ""),
+                        api_key=_decrypt_api_key(data.get("api_key", "")),
                     )
             except Exception as e:
                 print(f"Failed to load config: {e}")

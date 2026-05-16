@@ -25,13 +25,23 @@ def handle_llm_config():
         config_file = os.path.join(_data_dir, 'llm_config.json')
         if os.path.exists(config_file):
             with open(config_file, 'r', encoding='utf-8') as f:
-                return jsonify(json.load(f))
+                data = json.load(f)
+            # 解密 api_key 再返回给前端
+            from app.llm.config import _decrypt_api_key
+            if data.get('api_key'):
+                data['api_key'] = _decrypt_api_key(data['api_key'])
+            return jsonify(data)
         return jsonify({'provider': '', 'model': '', 'api_key': '', 'base_url': ''})
     else:
         data = request.json or {}
         config_file = os.path.join(_data_dir, 'llm_config.json')
+        # 加密 api_key 再存储
+        from app.llm.config import _encrypt_api_key
+        save_data = dict(data)
+        if save_data.get('api_key'):
+            save_data['api_key'] = _encrypt_api_key(save_data['api_key'])
         with open(config_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            json.dump(save_data, f, indent=2, ensure_ascii=False)
         return jsonify({'success': True})
 
 

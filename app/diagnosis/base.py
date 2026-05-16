@@ -56,7 +56,7 @@ class BaseChecker(ABC):
         self.results: List[CheckResult] = []
     
     @abstractmethod
-    async def diagnose(self, **kwargs) -> DiagnosisResult:
+    def diagnose(self, **kwargs) -> DiagnosisResult:
         """执行诊断"""
         pass
     

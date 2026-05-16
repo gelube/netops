@@ -15,7 +15,7 @@ class RoutingChecker(BaseChecker):
         super().__init__(ssh_connection)
         self.llm = llm_client
     
-    async def diagnose(self, source_ip: str = "", dest_ip: str = "", 
+    def diagnose(self, source_ip: str = "", dest_ip: str = "", 
                       symptom: str = "", **kwargs) -> DiagnosisResult:
         """
         执行路由诊断

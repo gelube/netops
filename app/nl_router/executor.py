@@ -447,22 +447,8 @@ class NLExecutor:
                 from app.diagnosis.engine import DiagnosisEngine
                 engine = DiagnosisEngine(llm_client=self.llm_client)
 
-                # DiagnosisEngine.diagnose() 是 async，用 asyncio 运行
-                import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        import nest_asyncio
-                        nest_asyncio.apply()
-                    result = loop.run_until_complete(
-                        engine.diagnose(diagnosis_type, params, conn)
-                    )
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    result = loop.run_until_complete(
-                        engine.diagnose(diagnosis_type, params, conn)
-                    )
+                # DiagnosisEngine.diagnose() 已改为同步方法
+                result = engine.diagnose(diagnosis_type, params, conn)
 
                 # 转换 DiagnosisResult → ExecutionResult
                 suggestions = result.suggestions or []
