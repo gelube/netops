@@ -106,19 +106,24 @@ class PingMonitor:
     
     async def ping(self, host: str) -> PingResult:
         """
-        执行 ping
-        
+        执行 ping（自动检测平台，支持 Windows/Linux/macOS）
+
         Args:
             host: 目标 IP 或主机名
-        
+
         Returns:
             PingResult
         """
-        # Windows ping 命令
-        # -n: 包数
-        # -w: 超时（毫秒）
-        cmd = ["ping", "-n", str(self.count), "-w", str(self.timeout * 1000), host]
-        
+        import platform as _platform
+        _is_windows = _platform.system().lower() == 'windows'
+
+        if _is_windows:
+            # Windows: -n 包数, -w 超时(毫秒)
+            cmd = ["ping", "-n", str(self.count), "-w", str(self.timeout * 1000), host]
+        else:
+            # Linux/macOS: -c 包数, -W 超时(秒)
+            cmd = ["ping", "-c", str(self.count), "-W", str(self.timeout), host]
+
         try:
             # 执行 ping
             proc = await asyncio.create_subprocess_exec(
@@ -126,52 +131,59 @@ class PingMonitor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            
+
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(),
                 timeout=self.timeout * self.count + 5
             )
-            
-            output = stdout.decode("gbk", errors="ignore")
-            
+
+            # Windows 用 GBK，Linux/macOS 用 UTF-8
+            encoding = "gbk" if _is_windows else "utf-8"
+            output = stdout.decode(encoding, errors="ignore")
+
             # 解析结果
             return self._parse_ping_output(host, output)
-        
+
         except asyncio.TimeoutError:
             return PingResult(host=host, success=False, error="timeout")
         except Exception as e:
             return PingResult(host=host, success=False, error=str(e))
     
     def _parse_ping_output(self, host: str, output: str) -> PingResult:
-        """解析 ping 输出"""
-        # Windows ping 输出格式：
-        # Reply from 192.168.1.1: bytes=32 time<1ms TTL=64
-        # Packets: Sent = 4, Received = 4, Lost = 0 (0% loss)
-        # Minimum = 0ms, Maximum = 0ms, Average = 0ms
-        
-        # 检查是否有回复
-        if "Reply from" not in output and "来自" not in output:
+        """解析 ping 输出（支持 Windows/Linux/macOS 格式）"""
+        # Windows: "Reply from 192.168.1.1: bytes=32 time<1ms TTL=64"
+        # Linux:   "64 bytes from 192.168.1.1: icmp_seq=1 ttl=64 time=0.123 ms"
+        # 中文 Windows: "来自 192.168.1.1 的回复: 字节=32 时间<1ms TTL=64"
+
+        has_reply = ("Reply from" in output or "来自" in output
+                     or "64 bytes from" in output or "icmp_seq" in output)
+        if not has_reply:
             return PingResult(host=host, success=False, error="no reply")
-        
+
         # 解析延迟
-        # 格式1: time=1ms 或 time<1ms
-        # 格式2: 时间=1ms 或 时间<1ms
+        # Windows: time=1ms / time<1ms / 时间=1ms
+        # Linux:   time=0.123 ms (有空格)
         latency = 0.0
-        latency_match = re.search(r"(?:time|时间)[=<]?(\d+)ms", output, re.IGNORECASE)
+        latency_match = re.search(
+            r"(?:time|时间)[=<]?(\d+(?:\.\d+)?)\s*ms", output, re.IGNORECASE
+        )
         if latency_match:
             latency = float(latency_match.group(1))
-        
+
         # 解析丢包率
-        # 格式: Lost = 0 (0% loss) 或 丢失 = 0 (0% 丢失)
+        # Windows: Lost = 0 (0% loss) / 丢失 = 0 (0% 丢失)
+        # Linux:   0% packet loss
         packet_loss = 0.0
         loss_match = re.search(r"\((\d+)%\s*(?:loss|丢失)\)", output, re.IGNORECASE)
+        if not loss_match:
+            # Linux format: "0% packet loss"
+            loss_match = re.search(r"(\d+)%\s*packet\s*loss", output, re.IGNORECASE)
         if loss_match:
             packet_loss = float(loss_match.group(1))
-        
+
         # 判断成功
-        success = "Reply from" in output or "来自" in output
-        success = success and packet_loss < 100
-        
+        success = has_reply and packet_loss < 100
+
         return PingResult(
             host=host,
             success=success,

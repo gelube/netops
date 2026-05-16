@@ -41,7 +41,7 @@ class NLExecutor:
         self.audit_logger = audit_logger or AuditLogger()
         self.intent_parser = IntentParser(llm_client) if llm_client else None
     
-    async def execute(self, user_input: str, user_id: str = "default") -> ExecutionResult:
+    def execute(self, user_input: str, user_id: str = "default") -> ExecutionResult:
         """
         执行用户自然语言请求
         
@@ -83,14 +83,14 @@ class NLExecutor:
             )
             
             # 解析意图（带上下文）
-            intent = await self.intent_parser.parse(resolved_input, context=context)
+            intent = self.intent_parser.parse(resolved_input, context=context)
             
             if intent.requires_ssh:
-                result = await self._execute_ssh_config(intent)
+                result = self._execute_ssh_config(intent)
             elif intent.intent_type.startswith("query_"):
-                result = await self._execute_query(intent)
+                result = self._execute_query(intent)
             elif intent.intent_type.startswith("diagnose_"):
-                result = await self._execute_diagnosis(intent)
+                result = self._execute_diagnosis(intent)
             else:
                 result = ExecutionResult(
                     success=False,
@@ -121,7 +121,7 @@ class NLExecutor:
         finally:
             self.audit_logger.log(audit_entry)
     
-    async def _execute_query(self, intent: ParsedIntent) -> ExecutionResult:
+    def _execute_query(self, intent: ParsedIntent) -> ExecutionResult:
         """执行查询类请求"""
         device_ip = intent.device_ip or intent.parameters.get("device_ip", "")
         device_hostname = intent.device_hostname
@@ -144,7 +144,7 @@ class NLExecutor:
             }
         )
     
-    async def _execute_ssh_config(self, intent: ParsedIntent) -> ExecutionResult:
+    def _execute_ssh_config(self, intent: ParsedIntent) -> ExecutionResult:
         """执行 SSH 配置"""
         if not self.llm_client:
             return ExecutionResult(success=False, message="LLM 客户端未初始化")
@@ -177,7 +177,7 @@ class NLExecutor:
         from app.network.ssh import DeviceConnection
         netmiko_type = DeviceConnection.VENDOR_DEVICE_TYPE_MAP.get(vendor, "cisco_ios")
         
-        commands = await self.intent_parser.generate_config_commands(
+        commands = self.intent_parser.generate_config_commands(
             intent=intent,
             vendor=vendor.value,
             device_hostname=device_hostname or "device"
@@ -224,7 +224,7 @@ class NLExecutor:
             }
         )
     
-    async def confirm_and_execute(
+    def confirm_and_execute(
         self, 
         confirmed: bool, 
         device_data: Dict[str, Any],
@@ -313,21 +313,21 @@ class NLExecutor:
         except Exception as e:
             return ExecutionResult(success=False, message=f"配置执行失败：{str(e)}")
     
-    async def _execute_diagnosis(self, intent: ParsedIntent) -> ExecutionResult:
+    def _execute_diagnosis(self, intent: ParsedIntent) -> ExecutionResult:
         """执行诊断工作流（基于 SSH）"""
         diagnosis_type = intent.intent_type
         params = intent.parameters
         
         if diagnosis_type == "diagnose_vlan":
-            return await self._diagnose_vlan(params)
+            return self._diagnose_vlan(params)
         elif diagnosis_type == "diagnose_routing":
-            return await self._diagnose_routing(params)
+            return self._diagnose_routing(params)
         elif diagnosis_type == "diagnose_connectivity":
-            return await self._diagnose_connectivity(params)
+            return self._diagnose_connectivity(params)
         else:
             return ExecutionResult(success=False, message=f"未知诊断类型：{diagnosis_type}")
     
-    async def _diagnose_vlan(self, params: Dict[str, Any]) -> ExecutionResult:
+    def _diagnose_vlan(self, params: Dict[str, Any]) -> ExecutionResult:
         """VLAN 故障诊断（基于 SSH）"""
         vlan_id = params.get("vlan_id", 0)
         symptom = params.get("symptom", "")
@@ -362,9 +362,9 @@ class NLExecutor:
             )
         
         # 执行实际诊断
-        return await self._run_diagnosis("vlan", params, device_ip or cred.ip, cred.username, cred.password)
+        return self._run_diagnosis("vlan", params, device_ip or cred.ip, cred.username, cred.password)
     
-    async def _diagnose_routing(self, params: Dict[str, Any]) -> ExecutionResult:
+    def _diagnose_routing(self, params: Dict[str, Any]) -> ExecutionResult:
         """路由故障诊断（基于 SSH）"""
         source_ip = params.get("source_ip", "")
         dest_ip = params.get("dest_ip", "")
@@ -393,10 +393,10 @@ class NLExecutor:
             )
         
         # 执行实际诊断
-        return await self._run_diagnosis("routing", params, device_ip or (cred.ip if cred else ""), 
+        return self._run_diagnosis("routing", params, device_ip or (cred.ip if cred else ""), 
                                          cred.username if cred else "", cred.password if cred else "")
     
-    async def _diagnose_connectivity(self, params: Dict[str, Any]) -> ExecutionResult:
+    def _diagnose_connectivity(self, params: Dict[str, Any]) -> ExecutionResult:
         """连通性故障诊断（基于 SSH）"""
         source_ip = params.get("source_ip", "")
         dest_ip = params.get("dest_ip", "")
@@ -429,7 +429,58 @@ class NLExecutor:
             confirmation_details=f"诊断路径：{source_ip} → {dest_ip}\n症状：{symptom}\n\n诊断步骤:\n{steps_text}\n\n请提供 SSH 凭证",
             data=diagnosis_plan
         )
-    
+
+    def _run_diagnosis(self, diagnosis_type: str, params: dict,
+                       device_ip: str, username: str, password: str) -> ExecutionResult:
+        """通过 DiagnosisEngine 执行实际诊断"""
+        try:
+            from app.network.ssh import DeviceConnection, ConnectionInfo
+            conn_info = ConnectionInfo(ip=device_ip, username=username, password=password)
+
+            with DeviceConnection(conn_info) as conn:
+                from app.diagnosis.engine import DiagnosisEngine
+                engine = DiagnosisEngine(llm_client=self.llm_client)
+
+                # DiagnosisEngine.diagnose() 是 async，用 asyncio 运行
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        import nest_asyncio
+                        nest_asyncio.apply()
+                    result = loop.run_until_complete(
+                        engine.diagnose(diagnosis_type, params, conn)
+                    )
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    result = loop.run_until_complete(
+                        engine.diagnose(diagnosis_type, params, conn)
+                    )
+
+                # 转换 DiagnosisResult → ExecutionResult
+                suggestions = result.suggestions or []
+                msg = result.root_cause or "诊断完成"
+                if suggestions:
+                    msg += "\n\n建议：\n" + "\n".join(f"  - {s}" for s in suggestions)
+
+                return ExecutionResult(
+                    success=result.success,
+                    message=msg,
+                    data={
+                        "root_cause": result.root_cause,
+                        "suggestions": suggestions,
+                        "steps": [
+                            {"step": s.step, "status": s.status.value, "message": s.message}
+                            for s in (result.steps or [])
+                        ],
+                    }
+                )
+        except ImportError:
+            return ExecutionResult(success=False, message="诊断模块未安装")
+        except Exception as e:
+            return ExecutionResult(success=False, message=f"诊断执行失败：{e}")
+
     def _format_confirmation(self, device: str, device_ip: str, vendor: str, commands: List[str]) -> str:
         """格式化确认信息"""
         lines = [

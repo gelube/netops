@@ -237,7 +237,7 @@ class IntentParser:
         # 导入通俗语言映射器
         self.language_mapper = get_language_mapper()
     
-    async def parse(self, user_input: str, context: str = "") -> ParsedIntent:
+    def parse(self, user_input: str, context: str = "") -> ParsedIntent:
         """
         解析用户输入（支持通俗语言）
         
@@ -252,7 +252,7 @@ class IntentParser:
         lang_parse = self.language_mapper.parse_user_input(user_input)
         
         # 第一步：意图分类（附带上文）
-        intent = await self._classify_intent(user_input, context=context)
+        intent = self._classify_intent(user_input, context=context)
         intent.raw_input = user_input
         
         # 第二步：合并通俗语言解析结果
@@ -274,7 +274,7 @@ class IntentParser:
         
         return intent
     
-    async def _classify_intent(self, user_input: str, context: str = "") -> ParsedIntent:
+    def _classify_intent(self, user_input: str, context: str = "") -> ParsedIntent:
         """使用 LLM 分类意图"""
         prompt = INTENT_CLASSIFICATION_PROMPT.format(user_input=user_input)
         
@@ -318,7 +318,7 @@ class IntentParser:
                 raw_input=user_input,
             )
     
-    async def generate_config_commands(
+    def generate_config_commands(
         self, 
         intent: ParsedIntent, 
         vendor: str,

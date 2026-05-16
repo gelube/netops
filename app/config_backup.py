@@ -127,26 +127,17 @@ class ConfigBackupManager:
     def restore_backup(self, backup: ConfigBackup) -> str:
         """
         恢复备份（返回配置内容）
-        
+
         Args:
             backup: 备份记录
-        
+
         Returns:
             配置内容
         """
-        # 从备份文件读取
         if os.path.exists(backup.backup_path):
             with open(backup.backup_path, "r", encoding="utf-8") as f:
                 return f.read()
-        
-        # 如果备份文件不存在，尝试从索引加载内容
-        index = self._load_index()
-        backups = index.get(backup.hostname, [])
-        
-        for b in backups:
-            if b["timestamp"] == backup.timestamp:
-                return b.get("config_content", "")
-        
+
         raise FileNotFoundError(f"备份文件不存在：{backup.backup_path}")
     
     def compare_backups(
@@ -200,8 +191,7 @@ class ConfigBackupManager:
             "config_hash": backup.config_hash,
             "backup_path": backup.backup_path,
             "comment": backup.comment,
-            # 也保存内容到索引（方便快速访问）
-            "config_content": backup.config_content,
+            # 不再在索引中存 config_content（文件已有，避免索引膨胀）
         })
         
         self._save_index(index)

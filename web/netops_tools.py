@@ -110,6 +110,39 @@ class NetOpsTools:
                 return {"success": True, "device": d}
         return {"success": False, "error": f"设备 {device_name} 不存在"}
 
+    def execute_command_on_device(self, device_name: str, commands: list, skip_backup: bool = False) -> dict:
+        """在设备上执行命令（公共接口，自动判断 SSH/Telnet）
+
+        供 WebSSHAdapter、diagnosis_adapter 等外部模块调用，
+        不应直接调用 _ssh_connect / _telnet_connect 等私有方法。
+
+        Args:
+            device_name: 设备名/备注/IP
+            commands: 命令列表
+            skip_backup: 跳过自动备份（备份操作调用时设为 True）
+
+        Returns:
+            dict: {success, device, results, snapshot_id?}
+        """
+        device = self._find_device(device_name)
+        if not device:
+            return {"success": False, "error": f"设备 {device_name} 不存在"}
+
+        conn_type = device.get('conn_type', 'ssh')
+        if conn_type == 'telnet':
+            return self._telnet_connect(device_name, commands, skip_backup=skip_backup)
+        else:
+            return self._ssh_connect(device_name, commands, skip_backup=skip_backup)
+
+    def find_device(self, device_name: str):
+        """查找设备（公共接口）
+
+        供外部模块调用，不应直接访问 _find_device。
+        Returns:
+            dict or None: 设备信息
+        """
+        return self._find_device(device_name)
+
     def _find_device(self, device_name):
         """查找设备（支持 name、remark、ip，模糊匹配）"""
         devices = self.load_devices()
@@ -480,7 +513,7 @@ class NetOpsTools:
             })
         return snapshots[:20]
 
-    def _telnet_connect(self, device_name, commands):
+    def _telnet_connect(self, device_name, commands, skip_backup=False):
         """Telnet 连接并执行命令"""
         device = self._find_device(device_name)
         if not device:

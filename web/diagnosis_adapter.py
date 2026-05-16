@@ -22,7 +22,7 @@ class WebSSHAdapter:
         self._last_output = ''
 
     def execute_command(self, command: str, timeout: int = 30) -> str:
-        """执行命令，通过 netops_tools"""
+        """执行命令，通过 netops_tools 公共接口"""
         import sys, os
         _web_dir = os.path.dirname(os.path.abspath(__file__))
         if _web_dir not in sys.path:
@@ -30,16 +30,7 @@ class WebSSHAdapter:
         from netops_tools import NetOpsTools
         tools = NetOpsTools()
 
-        # 判断设备连接方式
-        device = tools._find_device(self.device_name)
-        if not device:
-            raise Exception(f"设备 {self.device_name} 不存在")
-
-        conn_type = device.get('conn_type', 'ssh')
-        if conn_type == 'telnet':
-            result = tools._telnet_connect(self.device_name, [command])
-        else:
-            result = tools._ssh_connect(self.device_name, [command])
+        result = tools.execute_command_on_device(self.device_name, [command], skip_backup=True)
 
         if result.get('success') and result.get('results'):
             output = result['results'][0].get('output', '')

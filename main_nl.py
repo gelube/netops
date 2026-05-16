@@ -5,7 +5,6 @@ NetOps AI - 自然语言入口（纯 SSH 模式）
 """
 import sys
 import os
-import asyncio
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -16,7 +15,7 @@ from app.credentials import get_credential_manager, DeviceCredential
 from version import __version__
 
 
-async def main():
+def main():
     """主函数"""
     print(f"""
 ╔══════════════════════════════════════════════════════════╗
@@ -96,7 +95,7 @@ async def main():
                 continue
             
             # 执行自然语言请求
-            result = await executor.execute(user_input)
+            result = executor.execute(user_input)
             
             # 输出结果
             if result.success:
@@ -120,7 +119,7 @@ async def main():
                             
                             if cred:
                                 # 已有凭证，直接执行
-                                exec_result = await executor.confirm_and_execute(
+                                exec_result = executor.confirm_and_execute(
                                     confirmed=True,
                                     device_data=result.data,
                                     username=cred.username,
@@ -134,7 +133,7 @@ async def main():
                                 
                                 save = input("是否保存凭证？(y/n): ").strip().lower()
                                 
-                                exec_result = await executor.confirm_and_execute(
+                                exec_result = executor.confirm_and_execute(
                                     confirmed=True,
                                     device_data=result.data,
                                     username=username,
@@ -178,4 +177,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
