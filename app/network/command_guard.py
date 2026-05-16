@@ -67,7 +67,8 @@ class CommandGuard:
     HIGH_PATTERNS = [
         r'\breload\b',
         r'\breboot\b',
-        r'\bshutdown\b',                       # 关接口
+        r'(?:^|\n)\s*shutdown\b',                    # 关接口（仅在行首或配置块内）
+        r'\binterface\s+\S+[\s\S]*?shutdown\b',  # 接口下 shutdown
         r'\bno\s+(vlan|interface)\s+\d+',      # 删VLAN/接口
         r'\bno\s+ip\s+route\b',                # 删路由
         r'\bundo\s+(vlan|interface)\b',        # 华为删VLAN/接口
@@ -335,28 +336,35 @@ class ConfigBackup:
 
     def get_rollback_commands(self) -> List[str]:
         """
-        生成回滚命令（概念性，实际回滚需要根据配置diff生成）
+        生成回滚命令（概念性框架）
 
-        注意：完整的配置回滚是复杂操作，这里提供基础框架
+        注意：
+        - 华为需要 configuration rollback commit，需提前开启 rollback 功能
+        - 思科需要 configure replace，需事先 archive 配置
+        - Juniper 的 rollback 最简单，自动保存前50个commit
+        - 完整回滚应基于配置diff生成 undo/no 命令，而非整体替换
+        此方法仅返回指导性命令模板，不可直接执行。
         """
         if self.vendor in ("huawei", "huawei_vrpv8", "hp_comware"):
             return [
-                "system-view",
-                f"rollback configuration to ?",  # 华为需要指定回滚点
-                "return",
+                "# 华为回滚需先开启: rollback configuration commit",
+                "# 然后执行: rollback configuration to commit-id <ID>",
+                "# 或: compare configuration (查看差异)",
             ]
         elif self.vendor in ("cisco_ios", "cisco_nxos", "ruijie_os", "arista_eos"):
             return [
-                "configure replace running-config ?",  # 思科需要指定配置文件
+                "# 思科回滚需先配置: archive",
+                "# 然后执行: configure replace flash:<filename>",
+                "# 或: show archive (查看历史)",
             ]
         elif self.vendor == "juniper_junos":
             return [
                 "configure",
-                "rollback ?",  # Juniper需要指定回滚编号
+                "rollback <N>",  # N = 回滚编号，0是最前一个commit
                 "commit",
             ]
         else:
-            return []
+            return ["# 未知厂商，请手动回滚"]
 
     def get_config_diff_commands(self) -> List[str]:
         """获取配置变更差异的命令"""

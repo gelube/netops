@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-CONFIG_DIR = Path("Z:/netops-ai/web/data")
+CONFIG_DIR = Path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 CONFIG_DIR.mkdir(exist_ok=True)
 
 TOPOLOGY_FILE = CONFIG_DIR / "topology.json"

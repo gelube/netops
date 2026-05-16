@@ -24,6 +24,26 @@ def _load_devices():
             return json.load(f)
     return []
 
+# 设备列表缓存（避免每次 chat 都重读+重新格式化）
+_device_list_cache = {'mtime': 0, 'devices_str': ''}
+
+def _get_device_list_str():
+    """获取格式化的设备列表字符串（带文件修改时间缓存）"""
+    global _device_list_cache
+    try:
+        mtime = os.path.getmtime(_devices_file) if os.path.exists(_devices_file) else 0
+    except OSError:
+        mtime = 0
+
+    if mtime != _device_list_cache['mtime']:
+        devices = _load_devices()
+        _device_list_cache['mtime'] = mtime
+        _device_list_cache['devices_str'] = '\n'.join([
+            f"- {d.get('remark') or d.get('name')} ({d.get('ip')}, {d.get('vendor', 'unknown')})"
+            for d in devices
+        ])
+    return _device_list_cache['devices_str']
+
 
 @chat_bp.route('/api/chat', methods=['POST'])
 def chat():
@@ -60,18 +80,17 @@ def _do_chat(message, selected_device, session_id='default'):
     session_mgr = SessionManager(storage_dir=session_dir)
 
     # 加载会话历史
+    # 注意：Web端用 session_id 作为 user_id，每个浏览器tab一个会话
+    # SessionManager 的 user_id 参数在这里传的是 session_id
     session = session_mgr.get_session(session_id)
     if not session:
         session = session_mgr.create_session(session_id)
     # 使用 SessionManager.add_turn 来添加轮次（会自动保存）
     session_mgr.add_turn(session_id, TurnRole.USER, message)
 
-    # 构建系统提示
+    # 构建系统提示（使用缓存的设备列表字符串）
     devices = _load_devices()
-    device_list_str = '\n'.join([
-        f"- {d.get('remark') or d.get('name')} ({d.get('ip')}, {d.get('vendor', 'unknown')})"
-        for d in devices
-    ])
+    device_list_str = _get_device_list_str()
 
     system_prompt = f"""你是一个网络运维助手，帮助用户管理网络设备。
 

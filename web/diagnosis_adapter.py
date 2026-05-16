@@ -23,8 +23,10 @@ class WebSSHAdapter:
 
     def execute_command(self, command: str, timeout: int = 30) -> str:
         """执行命令，通过 netops_tools"""
-        import sys
-        sys.path.insert(0, r'Z:\netops-ai\web')
+        import sys, os
+        _web_dir = os.path.dirname(os.path.abspath(__file__))
+        if _web_dir not in sys.path:
+            sys.path.insert(0, _web_dir)
         from netops_tools import NetOpsTools
         tools = NetOpsTools()
 

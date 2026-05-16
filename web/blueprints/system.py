@@ -170,8 +170,12 @@ def api_file_read():
         return jsonify({'success': False, 'message': '只能读取项目目录下的文件'})
 
     # 不允许读取敏感文件
-    sensitive_patterns = ('.env', '.git', 'credentials', 'secret', 'password', 'private_key')
-    if any(p in abs_path.lower() for p in sensitive_patterns):
+    _SENSITIVE_EXTENSIONS = ('.env', '.pem', '.key', '.pkcs12', '.p12', '.jks', '.keystore')
+    _SENSITIVE_NAMES = ('.git', 'credentials', 'secret', 'password', 'private_key', 'id_rsa', 'id_ed25519')
+    _base_name = os.path.basename(abs_path).lower()
+    if any(abs_path.lower().endswith(e) for e in _SENSITIVE_EXTENSIONS):
+        return jsonify({'success': False, 'message': '不允许读取敏感文件（证书/密钥/环境配置）'})
+    if any(p in _base_name for p in _SENSITIVE_NAMES):
         return jsonify({'success': False, 'message': '不允许读取敏感文件'})
 
     try:
@@ -204,10 +208,10 @@ def api_file_write():
     if not abs_path.startswith(project_real + os.sep) and abs_path != project_real:
         return jsonify({'success': False, 'message': '只能写入项目目录下的文件'})
 
-    # 不允许写入可执行文件
-    dangerous_exts = ('.py', '.sh', '.bat', '.exe', '.cmd', '.ps1')
-    if any(abs_path.lower().endswith(e) for e in dangerous_exts):
-        return jsonify({'success': False, 'message': '不允许写入可执行文件'})
+    # 不允许写入可执行文件和敏感配置文件
+    _BLOCKED_WRITE_EXTS = ('.py', '.sh', '.bat', '.exe', '.cmd', '.ps1', '.env', '.pem', '.key', '.cfg', '.p12')
+    if any(abs_path.lower().endswith(e) for e in _BLOCKED_WRITE_EXTS):
+        return jsonify({'success': False, 'message': '不允许写入可执行文件或敏感配置文件'})
 
     try:
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)

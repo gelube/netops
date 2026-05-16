@@ -449,48 +449,53 @@ class NLExecutor:
         
         return "\n".join(lines)
     
+    # 引用解析映射表（中文+英文）
+    _REFERENCE_PATTERNS = [
+        # (匹配正则, 替换模板, 引用key)
+        (r'(那台设备|那设备|刚才的设备|that device|the device)', '{device}', '那台设备'),
+        (r'(那个VLAN|那个vlan|刚才的VLAN|that VLAN|the VLAN)', 'VLAN {vlan}', '那个VLAN'),
+        (r'(那个接口|刚才的接口|that interface|the interface|that port)', '{interface}', '那个接口'),
+        (r'(再查一下|再看看|check again|look again)', None, None),  # 特殊：替换整句
+    ]
+
     def _resolve_references(self, user_input: str, user_id: str) -> str:
         """
-        解析用户输入中的引用（如"那台设备"、"那个VLAN"）
-        
+        解析用户输入中的引用（如"那台设备"、"那个VLAN"、"that device"）
+
         Args:
             user_input: 用户输入
             user_id: 用户ID
-        
+
         Returns:
             解析后的输入
         """
+        import re as _re
         resolved = user_input
-        
-        # 解析"那台设备"引用
-        if "那台设备" in user_input or "那设备" in user_input or "刚才的设备" in user_input:
-            device = self.session_manager.resolve_reference(user_id, "那台设备")
-            if device:
-                resolved = resolved.replace("那台设备", device).replace("那设备", device).replace("刚才的设备", device)
-        
-        # 解析"那个VLAN"引用
-        if "那个VLAN" in user_input or "那个vlan" in user_input or "刚才的VLAN" in user_input:
-            vlan = self.session_manager.resolve_reference(user_id, "那个VLAN")
-            if vlan:
-                resolved = resolved.replace("那个VLAN", f"VLAN {vlan}").replace("那个vlan", f"VLAN {vlan}").replace("刚才的VLAN", f"VLAN {vlan}")
-        
-        # 解析"那个接口"引用
-        if "那个接口" in user_input or "刚才的接口" in user_input:
-            interface = self.session_manager.resolve_reference(user_id, "那个接口")
-            if interface:
-                resolved = resolved.replace("那个接口", interface).replace("刚才的接口", interface)
-        
-        # 解析"再查一下"等模糊引用
-        if "再查一下" in user_input or "再看看" in user_input:
-            # 获取最近操作的设备
-            session = self.session_manager.get_session(user_id, create_if_not_exists=False)
-            if session and session.last_device:
-                # 在输入前添加设备上下文
-                if "再查一下" in user_input:
-                    resolved = user_input.replace("再查一下", f"查一下 {session.last_device}")
-                elif "再看看" in user_input:
-                    resolved = user_input.replace("再看看", f"看看 {session.last_device}")
-        
+
+        for pattern, template, ref_key in self._REFERENCE_PATTERNS:
+            if template is None:
+                # 特殊模式：替换整句
+                if _re.search(pattern, resolved, _re.IGNORECASE):
+                    session = self.session_manager.get_session(user_id, create_if_not_exists=False)
+                    if session and session.last_device:
+                        resolved = _re.sub(pattern, f'查一下 {session.last_device}', resolved, flags=_re.IGNORECASE)
+                continue
+
+            match = _re.search(pattern, resolved, _re.IGNORECASE)
+            if not match:
+                continue
+
+            value = self.session_manager.resolve_reference(user_id, ref_key)
+            if not value:
+                continue
+
+            if '{device}' in template:
+                resolved = _re.sub(pattern, value, resolved, flags=_re.IGNORECASE)
+            elif '{vlan}' in template:
+                resolved = _re.sub(pattern, f'VLAN {value}', resolved, flags=_re.IGNORECASE)
+            elif '{interface}' in template:
+                resolved = _re.sub(pattern, value, resolved, flags=_re.IGNORECASE)
+
         return resolved
 
 

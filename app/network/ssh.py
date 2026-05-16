@@ -96,14 +96,13 @@ class DeviceConnection:
             raise Exception(f"连接失败 {self.conn_info.ip}: {str(e)}")
     
     # prompt/输出特征 → netmiko device_type 映射（用于快速检测）
+    # 注意：正则从具体到通用排列，先匹配的特殊模式优先
     PROMPT_VENDOR_MAP = [
+        (r'\S+@[\w-]+>', 'juniper_junos'),        # user@router> (最特殊)
         (r'[<\[]\S+[>#\]]', 'huawei'),          # <SW-Core> or [SW-Core]
-        (r'\S+[>#]\s*$', 'cisco_ios'),           # SW-Core# or SW-Core>
         (r'\S+:\S+[>#]', 'hp_comware'),           # H3C: <SW-Core> or SW-Core#
-        (r'\S+@[\w-]+>', 'juniper_junos'),        # user@router>
-        (r'\S+#\s*$', 'ruijie_os'),               # Ruijie#
-        (r'\S+>', 'arista_eos'),                   # arista>
-        (r'\S+#\s*$', 'cisco_nxos'),              # Nexus#
+        (r'\S+#\s*$', 'cisco_ios'),               # SW-Core# (IOS/NXOS/锐捷共用，需版本输出区分)
+        (r'\S+>\s*$', 'cisco_ios'),               # SW-Core> (用户模式)
     ]
 
     # 版本输出关键词 → device_type 映射
