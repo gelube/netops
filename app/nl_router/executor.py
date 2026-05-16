@@ -9,6 +9,7 @@ from app.nl_router.parser import ParsedIntent, IntentParser
 from app.session import SessionManager
 from app.session.models import TurnRole
 from app.audit import AuditLogger, AuditEntry
+from app.network.command_guard import CommandGuard, ConfigBackup
 
 
 @dataclass
@@ -172,6 +173,10 @@ class NLExecutor:
         }
         vendor = vendor_map.get(vendor_str.lower(), Vendor.HUAWEI)
         
+        # 确定netmiko device_type用于安全校验
+        from app.network.ssh import DeviceConnection
+        netmiko_type = DeviceConnection.VENDOR_DEVICE_TYPE_MAP.get(vendor, "cisco_ios")
+        
         commands = await self.intent_parser.generate_config_commands(
             intent=intent,
             vendor=vendor.value,
@@ -181,9 +186,29 @@ class NLExecutor:
         if not commands:
             return ExecutionResult(success=False, message="未能生成配置命令")
         
+        # ===== 新增：命令安全校验 =====
+        guard = CommandGuard(vendor=netmiko_type, strict_mode=True)
+        guard_result = guard.check_commands(commands)
+        
+        # 如果有被拦截的命令，拒绝执行
+        if guard_result.blocked_commands:
+            report = guard.format_guard_report(guard_result)
+            return ExecutionResult(
+                success=False,
+                message=f"命令安全检查未通过，{len(guard_result.blocked_commands)} 条命令被拦截",
+                requires_confirmation=False,
+                confirmation_details=report,
+                data={"guard_result": guard_result, "commands": commands},
+            )
+        
         confirmation_details = self._format_confirmation(
             device_hostname or "device", device_ip, vendor.value, commands
         )
+        
+        # 附加安全检查报告
+        if guard_result.warnings or guard_result.requires_backup:
+            report = guard.format_guard_report(guard_result)
+            confirmation_details += f"\n\n{report}"
         
         return ExecutionResult(
             success=True,
@@ -195,6 +220,7 @@ class NLExecutor:
                 "device": device_hostname,
                 "device_ip": device_ip,
                 "vendor": vendor.value,
+                "guard_result": guard_result,  # 传递安全检查结果
             }
         )
     
@@ -205,15 +231,24 @@ class NLExecutor:
         username: str, 
         password: str,
     ) -> ExecutionResult:
-        """用户确认后执行配置"""
+        """用户确认后执行配置（含自动备份）"""
         if not confirmed:
             return ExecutionResult(success=False, message="用户取消配置")
         
         device_ip = device_data.get("device_ip", "")
         commands = device_data.get("commands", [])
+        vendor = device_data.get("vendor", "")
+        guard_result = device_data.get("guard_result")
         
         if not device_ip or not commands:
             return ExecutionResult(success=False, message="设备数据不完整")
+        
+        # 检查安全校验结果——如果有被拦截的命令，不允许执行
+        if guard_result and guard_result.blocked_commands:
+            return ExecutionResult(
+                success=False,
+                message=f"安全检查未通过，{len(guard_result.blocked_commands)} 条命令被拦截，拒绝执行"
+            )
         
         from app.network.ssh import test_connection, DeviceConnection, ConnectionInfo
         
@@ -224,12 +259,56 @@ class NLExecutor:
             conn_info = ConnectionInfo(ip=device_ip, username=username, password=password)
             
             with DeviceConnection(conn_info) as conn:
+                # 如果有配置变更，先备份
+                backup = ConfigBackup(conn, vendor=vendor)
+                needs_backup = guard_result.requires_backup if guard_result else any(
+                    cmd.strip().lower() not in ('quit', 'exit', 'end', 'return', 'y')
+                    for cmd in commands
+                )
+                
+                backup_ok = False
+                if needs_backup:
+                    backup_ok = backup.backup()
+                    if not backup_ok:
+                        return ExecutionResult(
+                            success=False,
+                            message="⚠️ 配置备份失败，为安全起见取消执行。请检查设备连接和权限。"
+                        )
+                
+                # 过滤被拦截的命令
+                if guard_result:
+                    safe_commands = [
+                        r.command for r in guard_result.results 
+                        if r.is_allowed
+                    ]
+                else:
+                    safe_commands = commands
+                
+                # 执行命令
                 results = []
-                for cmd in commands:
-                    output = conn.execute_command(cmd)
-                    results.append({"command": cmd, "output": output})
+                for cmd in safe_commands:
+                    try:
+                        output = conn.execute_command(cmd)
+                        results.append({"command": cmd, "output": output, "success": True})
+                    except Exception as e:
+                        results.append({"command": cmd, "output": str(e), "success": False})
+                        # 命令执行失败，停止后续命令
+                        break
+                
+                # 检查是否有失败的命令
+                failed = [r for r in results if not r["success"]]
+                if failed:
+                    return ExecutionResult(
+                        success=False,
+                        message=f"执行到第 {len(results)} 条命令时失败：{failed[0]['output']}\n\n💾 已备份配置，可手动回滚。",
+                        data={"results": results, "backup_available": backup_ok}
+                    )
             
-            return ExecutionResult(success=True, message="配置执行成功", data={"results": results})
+            return ExecutionResult(
+                success=True,
+                message=f"配置执行成功（{len(results)} 条命令）" + ("，已备份原配置" if backup_ok else ""),
+                data={"results": results, "backup_available": backup_ok}
+            )
         
         except Exception as e:
             return ExecutionResult(success=False, message=f"配置执行失败：{str(e)}")

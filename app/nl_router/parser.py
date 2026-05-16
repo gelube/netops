@@ -10,6 +10,7 @@ import json
 from app.llm.config import LLMClient
 from app.nl_router.intent_types import requires_ssh, is_diagnosis
 from app.nl_router.language_map import get_language_mapper
+from app.network.command_templates import TemplateMatcher
 
 
 class ParsedIntent(BaseModel):
@@ -236,12 +237,13 @@ class IntentParser:
         # 导入通俗语言映射器
         self.language_mapper = get_language_mapper()
     
-    async def parse(self, user_input: str) -> ParsedIntent:
+    async def parse(self, user_input: str, context: str = "") -> ParsedIntent:
         """
         解析用户输入（支持通俗语言）
         
         Args:
             user_input: 用户自然语言输入
+            context: 会话上下文（如之前的设备、VLAN等）
         
         Returns:
             ParsedIntent
@@ -249,8 +251,8 @@ class IntentParser:
         # 第零步：通俗语言解析（提取部门、位置、接口等）
         lang_parse = self.language_mapper.parse_user_input(user_input)
         
-        # 第一步：意图分类
-        intent = await self._classify_intent(user_input)
+        # 第一步：意图分类（附带上文）
+        intent = await self._classify_intent(user_input, context=context)
         intent.raw_input = user_input
         
         # 第二步：合并通俗语言解析结果
@@ -272,9 +274,13 @@ class IntentParser:
         
         return intent
     
-    async def _classify_intent(self, user_input: str) -> ParsedIntent:
+    async def _classify_intent(self, user_input: str, context: str = "") -> ParsedIntent:
         """使用 LLM 分类意图"""
         prompt = INTENT_CLASSIFICATION_PROMPT.format(user_input=user_input)
+        
+        # 如果有上下文，附加到 prompt 中
+        if context:
+            prompt += f"\n\n## 上下文\n{context}"
         
         try:
             response = self.llm.chat(
@@ -319,7 +325,7 @@ class IntentParser:
         device_hostname: str
     ) -> List[str]:
         """
-        生成配置命令
+        生成配置命令 — 模板优先，LLM兜底
         
         Args:
             intent: 解析后的意图
@@ -329,6 +335,17 @@ class IntentParser:
         Returns:
             配置命令列表
         """
+        # 1. 先尝试模板匹配（100%可靠）
+        template_commands = TemplateMatcher.match(
+            intent_type=intent.intent_type,
+            vendor=vendor,
+            parameters=intent.parameters
+        )
+        
+        if template_commands:
+            return template_commands
+        
+        # 2. 模板未匹配，走LLM生成
         prompt = CONFIG_COMMAND_PROMPT.format(
             vendor=vendor,
             intent_type=intent.intent_type,

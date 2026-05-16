@@ -19,7 +19,21 @@
 
     .layout { height: calc(100vh - 108px); display: grid; grid-template-columns: 200px 1fr; }
 
-    .left { border-right: 1px solid #1f2937; background: #0b1220; padding: 8px; overflow: auto; }
+    .left { border-right: 1px solid #1f2937; background: #0b1220; padding: 8px; overflow: auto; display: flex; flex-direction: column; }
+    .left-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+    .left-tab { flex: 1; padding: 6px 8px; border: 1px solid #334155; background: #1e293b; color: #94a3b8; border-radius: 4px; cursor: pointer; font-size: 11px; }
+    .left-tab:hover { border-color: #22d3ee; color: #e5e7eb; }
+    .left-tab.active { border-color: #22d3ee; background: #0f172a; color: #22d3ee; }
+    .left-content { flex: 1; overflow: auto; }
+    .audit-item { padding: 8px; border: 1px solid #1f2937; border-radius: 6px; background: #0f172a; margin-bottom: 4px; font-size: 11px; }
+    .audit-time { color: #6b7280; font-size: 10px; }
+    .audit-action { color: #22d3ee; font-weight: 600; }
+    .audit-target { color: #94a3b8; }
+    .audit-success { color: #34d399; }
+    .audit-failed { color: #ef4444; }
+    .knowledge-item { padding: 8px; border: 1px solid #1f2937; border-radius: 6px; background: #0f172a; margin-bottom: 4px; font-size: 11px; }
+    .knowledge-symptom { color: #fb923c; }
+    .knowledge-solution { color: #34d399; }
     .left h3 { margin-bottom: 10px; color: #67e8f9; font-size: 14px; }
     .device-item { padding: 8px; border: 1px solid #1f2937; border-radius: 6px; background: #0f172a; margin-bottom: 4px; cursor: pointer; }
     .device-item:hover { border-color: #22d3ee; }
@@ -137,8 +151,20 @@
 
   <div class="layout">
     <aside class="left">
-      <h3>设备列表</h3>
-      <div id="device-list"></div>
+      <div class="left-tabs">
+        <button class="left-tab active" data-tab="devices">设备</button>
+        <button class="left-tab" data-tab="audit">审计</button>
+        <button class="left-tab" data-tab="knowledge">知识库</button>
+      </div>
+      <div class="left-content" id="tab-devices">
+        <div id="device-list"></div>
+      </div>
+      <div class="left-content" id="tab-audit" style="display:none;">
+        <div id="audit-logs"></div>
+      </div>
+      <div class="left-content" id="tab-knowledge" style="display:none;">
+        <div id="knowledge-stats"></div>
+      </div>
     </aside>
 
     <main class="center">
@@ -326,6 +352,20 @@
       document.getElementById('topo-refresh-interval').onchange = function() {
         if(document.getElementById('topo-autorefresh').checked) startTopoRefresh(parseInt(this.value));
       };
+
+      // 左侧标签页切换
+      document.querySelectorAll('.left-tab').forEach(tab => {
+        tab.onclick = () => {
+          document.querySelectorAll('.left-tab').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          document.querySelectorAll('.left-content').forEach(c => c.style.display = 'none');
+          const tabId = tab.dataset.tab;
+          document.getElementById('tab-' + tabId).style.display = 'block';
+          // 切换到审计/知识库时加载数据
+          if (tabId === 'audit') loadAuditLogs();
+          if (tabId === 'knowledge') loadKnowledgeStats();
+        };
+      });
 
       initTopologyInteractions();
     }
@@ -1101,23 +1141,160 @@
       }
     }
 
+    async function structuredDiagnose(dev, type) {
+      // 结构化诊断：走 /api/diagnose，不走 LLM，确定性排错
+      const typeLabels = {vlan:'VLAN', routing:'路由', connectivity:'连通性'};
+      const label = typeLabels[type] || type;
+      addMsg('user', `🔍 ${label}诊断: ${dev}`);
+      addMsg('system', `⏳ 正在执行${label}结构化诊断...`);
+      try {
+        const r = await fetch('/api/diagnose', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device: dev, type: type, symptom: `${label}故障排查` })
+        });
+        const res = await r.json();
+        if (!res.success) {
+          addMsg('ai', `❌ 诊断失败: ${res.message||'未知错误'}`);
+          return;
+        }
+        // 格式化诊断结果
+        let html = `<div style="background:#1e1b4b;border:1px solid #4f46e5;border-radius:8px;padding:12px;">`;
+        html += `<div style="color:#a5b4fc;font-weight:600;margin-bottom:8px;">🔍 ${label}诊断结果</div>`;
+        if (res.steps && res.steps.length) {
+          for (const s of res.steps) {
+            const icon = s.status === 'PASS' ? '✅' : (s.status === 'FAIL' ? '❌' : (s.status === 'WARNING' ? '⚠️' : '⏭️'));
+            html += `<div style="margin-bottom:6px;">`;
+            html += `<div>${icon} <b>${escapeHtml(s.step)}</b> — ${escapeHtml(s.message)}</div>`;
+            if (s.suggestion) html += `<div style="color:#fbbf24;font-size:11px;margin-left:20px;">💡 ${escapeHtml(s.suggestion)}</div>`;
+            html += `</div>`;
+          }
+        }
+        if (res.root_cause) {
+          html += `<div style="margin-top:8px;padding:8px;background:#7f1d1d;border-radius:4px;color:#fca5a5;">🎯 根因: ${escapeHtml(res.root_cause)}</div>`;
+        }
+        if (res.suggestions && res.suggestions.length) {
+          html += `<div style="margin-top:8px;color:#86efac;font-size:12px;">💡 修复建议:</div>`;
+          for (const s of res.suggestions) {
+            html += `<div style="color:#86efac;font-size:12px;margin-left:12px;">• ${escapeHtml(s)}</div>`;
+          }
+        }
+        html += `</div>`;
+        addMsg('ai', html);
+      } catch(e) {
+        addMsg('ai', `❌ 诊断请求失败: ${e.message}`);
+      }
+    }
+
+    async function showRollback(dev) {
+      addMsg('user', `⏪ 查询 ${dev} 的配置快照`);
+      try {
+        const r = await fetch(`/api/snapshots?device=${encodeURIComponent(dev)}`);
+        const d = await r.json();
+        if (!d.success || !d.snapshots?.length) {
+          addMsg('ai', 'ℹ️ 没有可用的配置快照');
+          return;
+        }
+        let html = `<div style="background:#1a1030;border:1px solid #7f1d1d;border-radius:8px;padding:12px;">`;
+        html += `<div style="color:#fca5a5;font-weight:600;margin-bottom:8px;">⏪ ${dev} 的配置快照</div>`;
+        for (const s of d.snapshots) {
+          const time = s.id.split('_').slice(-2).join(' ').replace(/_/g,':');
+          const size = (s.size/1024).toFixed(1);
+          html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;border-bottom:1px solid #334155;">`;
+          html += `<div><span style="color:#94a3b8;">${time}</span> <span style="color:#64748b;font-size:10px;">${size}KB</span></div>`;
+          html += `<button class="btn" style="background:#dc2626;color:#fff;padding:2px 8px;font-size:11px;" onclick="doRollback('${dev}','${s.id}')">回滚</button>`;
+          html += `</div>`;
+        }
+        html += `</div>`;
+        addMsg('ai', html);
+      } catch(e) {
+        addMsg('ai', `❌ 查询快照失败: ${e.message}`);
+      }
+    }
+
+    async function doRollback(dev, snapshotId) {
+      if (!confirm(`确认回滚 ${dev} 到快照 ${snapshotId}?`)) return;
+      addMsg('system', `⏳ 正在回滚 ${dev}...`);
+      try {
+        const r = await fetch('/api/rollback', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device:dev,snapshot_id:snapshotId})});
+        const d = await r.json();
+        addMsg('ai', d.success ? `✅ 回滚成功: ${dev} 已恢复到 ${snapshotId}` : `❌ 回滚失败: ${d.message||d.error||'未知错误'}`);
+      } catch(e) {
+        addMsg('ai', `❌ 回滚请求失败: ${e.message}`);
+      }
+    }
+
+    async function sendChatWithPreview(msg, context) {
+      // 配置操作：先预览命令，用户确认后再执行
+      const input = document.getElementById('chat-input');
+      input.value = '';
+      addMsg('system', '⏳ 正在生成命令预览...');
+
+      try {
+        const previewRes = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          message: msg, context, preview_only: true
+        })});
+        const previewData = await previewRes.json();
+
+        if (!previewData.success && !previewData.preview) {
+          addMsg('ai', '❌ ' + (previewData.message || '预览失败'));
+          return;
+        }
+
+        if (!previewData.preview || !previewData.planned_commands?.length) {
+          // 没有工具调用，直接显示文本回复
+          addMsg('user', msg);
+          addMsg('ai', previewData.response || '无操作需要执行');
+          return;
+        }
+
+        const cmds = previewData.planned_commands;
+        // 在聊天区显示预览
+        let previewHtml = '<div style="color:#f59e0b;font-weight:600;margin-bottom:6px;">⚠️ 配置命令预览</div>';
+        for (const item of cmds) {
+          previewHtml += `<div style="margin-bottom:6px;"><span style="color:#22d3ee;font-size:12px;font-weight:600;">📌 ${escapeHtml(item.device)}</span>`;
+          if (item.commands?.length) {
+            previewHtml += `<pre style="background:#0b1220;border:1px solid #334155;border-radius:4px;padding:6px 8px;margin-top:2px;font-size:11px;">${item.commands.map(c => escapeHtml(c)).join('\n')}</pre>`;
+          }
+          previewHtml += '</div>';
+        }
+        previewHtml += `<div style="display:flex;gap:6px;margin-top:8px;">`;
+        previewHtml += `<button class="btn" style="background:#dc2626;color:#fff;" onclick="confirmChatExec(this,'${escapeHtml(JSON.stringify(cmds).replace(/'/g,"\\'"))}', '${escapeHtml(msg)}', '${escapeHtml(JSON.stringify(context))}')">确认执行</button>`;
+        previewHtml += `<button class="btn" onclick="this.parentElement.parentElement.remove()">取消</button>`;
+        previewHtml += `</div>`;
+        addMsg('ai', previewHtml);
+        // 移除预览提示
+        const msgs = document.getElementById('messages');
+        const sysMsg = msgs.querySelector('.msg-system:last-of-type');
+        // 不移除，让它自然保留
+      } catch(e) {
+        addMsg('ai', '❌ 预览失败: ' + e.message);
+      }
+    }
+
+    async function confirmChatExec(btn, cmdsJson, msg, contextJson) {
+      const cmds = JSON.parse(cmdsJson);
+      const context = JSON.parse(contextJson);
+      // 禁用按钮防止重复点击
+      btn.disabled = true; btn.textContent = '执行中...';
+      addMsg('user', msg);
+      try {
+        const r = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          message: msg, context, confirmed_commands: cmds
+        })});
+        const res = await r.json();
+        addMsg('ai', (res.success?'✅ ':'❌ ')+(res.response||res.message||''));
+      } catch(e) {
+        addMsg('ai', '❌ 执行失败: '+e.message);
+      }
+    }
+
     async function sendChat() {
       if (_chatBusy) return;
       const input = document.getElementById('chat-input');
       const msg = input.value.trim();
       if (!msg) return;
-      // 配置操作二次确认
-      const cfgWords = ['配置','创建','删除','修改','关闭','shutdown','undo','撤销'];
-      if (cfgWords.some(k => msg.includes(k)) && !msg.includes('确认') && !msg.includes('查询') && !msg.includes('查看') && !msg.includes('display') && !msg.includes('show')) {
-        if (!confirm('⚠️ 检测到配置操作:\n\n' + msg + '\n\n确认执行？')) return;
-      }
-      addMsg('user', msg);
-      input.value = '';
-      _chatBusy = true;
-      _chatAbort = new AbortController();
-      document.getElementById('btn-stop').style.display = '';
-      document.getElementById('btn-send').style.display = 'none';
-      
+
       // 从拓扑多选中获取目标设备
       const selected = Array.from(selectedIds).map(id => devices.find(d => d.id === id)).filter(Boolean);
       let context = {};
@@ -1127,6 +1304,53 @@
       } else if (selected.length === 1) {
         context.selected_device = selected[0].name || selected[0].remark;
       } else {
+        const d = devices.find(x => x.id === selectedId);
+        if (d) context.selected_device = d.name || d.remark;
+      }
+
+      // ====== 先尝试快速模板匹配（不走 LLM，秒回）======
+      const selDev = devices.find(x => x.id === selectedId);
+      if (selDev) {
+        try {
+          const qr = await fetch('/api/quick-config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+            message: msg, device: selDev?.name||selDev?.remark, mode: 'preview'
+          })});
+          const qd = await qr.json();
+          if (qd.matched) {
+            input.value = '';
+            if (qd.query) {
+              addMsg('user', msg);
+              const parts = [];
+              for (const r of (qd.results||[])) {
+                if (r.success && r.results) {
+                  for (const x of r.results) { parts.push(`命令: ${x.command}\n${x.output?.slice(0,2000)||''}`); }
+                } else if (!r.success) { parts.push(`❌ ${r.error||'失败'}`); }
+              }
+              addMsg('ai', parts.join('\n---\n') || '查询完成');
+              if(selDev) collectDeviceFacts(selDev?.name||selDev?.remark);
+            } else if (qd.preview) {
+              await sendChatWithPreview(msg, context);
+            }
+            return;
+          }
+        } catch(e) { /* 快速模板失败，fallback 到 LLM */ }
+      }
+
+      // 配置操作走预览确认流程（不再用 confirm 弹窗）
+      const cfgWords = ['配置','创建','删除','修改','关闭','shutdown','undo','撤销'];
+      const isConfigOp = cfgWords.some(k => msg.includes(k)) && !msg.includes('查询') && !msg.includes('查看') && !msg.includes('display') && !msg.includes('show');
+
+      if (isConfigOp) {
+        await sendChatWithPreview(msg, context);
+        return;
+      }
+
+      addMsg('user', msg);
+      input.value = '';
+      _chatBusy = true;
+      _chatAbort = new AbortController();
+      document.getElementById('btn-stop').style.display = '';
+      document.getElementById('btn-send').style.display = 'none';
         const d = devices.find(x => x.id === selectedId);
         if (d) context.selected_device = d.name || d.remark;
       }
@@ -1390,6 +1614,9 @@
         '<div style="margin-bottom:8px;">' +
         '<button class="btn" style="width:100%;background:#1d4ed8;color:#fff;font-weight:600;padding:10px;" onclick="fullDiagnose(\''+dev+'\')">🔍 一键全面诊断</button>' +
         '</div>' +
+        '<div style="margin-bottom:6px;">' +
+        '<button class="btn" style="width:100%;background:#7f1d1d;color:#fca5a5;font-weight:600;padding:8px;" onclick="showRollback(\''+dev+'\')">⏪ 配置回滚</button>' +
+        '</div>' +
         '<div style="margin-bottom:6px;color:#64748b;font-size:10px;">连通性测试</div>' +
         '<div class="cfg-grid">' +
         '<button class="btn" onclick="promptConfig(\''+dev+'\',\'ping\',\'请输入目标IP，如 192.168.1.1\')">🏓 Ping测试</button>' +
@@ -1399,9 +1626,9 @@
         '</div>' +
         '<div style="margin:10px 0 6px;color:#64748b;font-size:10px;">协议诊断</div>' +
         '<div class="cfg-grid">' +
-        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'诊断VLAN\')">🔍 VLAN诊断</button>' +
-        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'诊断路由\')">🔍 路由诊断</button>' +
-        '<button class="btn" onclick="quickQuery(\''+dev+'\',\'诊断连通性\')">🔍 连通性诊断</button>' +
+        '<button class="btn" onclick="structuredDiagnose(\''+dev+'\',\'vlan\')">🔍 VLAN诊断</button>' +
+        '<button class="btn" onclick="structuredDiagnose(\''+dev+'\',\'routing\')">🔍 路由诊断</button>' +
+        '<button class="btn" onclick="structuredDiagnose(\''+dev+'\',\'connectivity\')">🔍 连通性诊断</button>' +
         '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display lldp neighbor-information list\')">🤝 LLDP邻居</button>' +
         '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display interface brief\')">🔌 接口状态</button>' +
         '<button class="btn" onclick="quickQuery(\''+dev+'\',\'display cpu-usage\')">🖥️ CPU使用率</button>' +
@@ -1416,110 +1643,250 @@
     // ===== 统一执行 =====
     function execForm(type, dev) {
       const v = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
-      let msg = '';
+      const d = devices.find(x => x.id === selectedId);
+      const vendor = d?.vendor || 'unknown';
+      const isHua = vendor==='huawei'||vendor==='h3c'||vendor==='ruijie';
+      const isCis = vendor==='cisco'||vendor==='cisco_nxos'||vendor==='arista'||vendor==='juniper';
+
+      let commands = []; // 直接生成命令列表
+      let msg = '';      // 用户可见描述
+
       switch(type) {
         case 'vlan': {
-          const act=v('cfg-vlan-action'), vid=v('cfg-vlan-id'), nm=v('cfg-vlan-name'), desc=v('cfg-vlan-desc');
+          const act=v('cfg-vlan-action'), vid=v('cfg-vlan-id'), nm=v('cfg-vlan-name');
           if(!vid){alert('填 VLAN ID');return;}
-          msg = act==='create' ? `在 ${dev} 上创建 VLAN ${vid}${nm?' 名称 '+nm:''}${desc?' 描述 '+desc:''}` : `在 ${dev} 上删除 VLAN ${vid}`;
+          if(act==='create') {
+            msg = `创建 VLAN ${vid}${nm?' 名称 '+nm:''}`;
+            if(isHua) commands = [`vlan ${vid}`, nm?`name ${nm}`:`description VLAN_${vid}`, 'quit'];
+            else if(isCis) commands = [`vlan ${vid}`, nm?`name ${nm}`:`name VLAN_${vid}`, 'exit'];
+          } else {
+            msg = `删除 VLAN ${vid}`;
+            if(isHua) commands = [`undo vlan ${vid}`];
+            else if(isCis) commands = [`no vlan ${vid}`];
+          }
           break;
         }
         case 'interface': {
           const port=v('cfg-if-port'), act=v('cfg-if-action'), val=v('cfg-if-val');
           if(!port){alert('填接口');return;}
-          if(act==='desc') msg=`在 ${dev} 上给接口 ${port} 设置描述"${val}"`;
-          else if(act==='shutdown') msg=`在 ${dev} 上关闭接口 ${port}`;
-          else if(act==='noshutdown') msg=`在 ${dev} 上开启接口 ${port}`;
-          else if(act==='speed') msg=`在 ${dev} 上将接口 ${port} 速率设为 ${val||'auto'}`;
-          else if(act==='duplex') msg=`在 ${dev} 上将接口 ${port} 双工模式设为 ${val||'auto'}`;
+          if(act==='shutdown') {
+            msg=`关闭接口 ${port}`;
+            commands = [`interface ${port}`, 'shutdown', isHua?'quit':'exit'];
+          } else if(act==='noshutdown') {
+            msg=`开启接口 ${port}`;
+            commands = [`interface ${port}`, isHua?'undo shutdown':'no shutdown', isHua?'quit':'exit'];
+          } else if(act==='desc') {
+            msg=`设置接口 ${port} 描述 "${val}"`;
+            commands = [`interface ${port}`, `description ${val}`, isHua?'quit':'exit'];
+          } else if(act==='speed') {
+            msg=`设置接口 ${port} 速率 ${val||'auto'}`;
+            commands = [`interface ${port}`, `speed ${val||'auto'}`, isHua?'quit':'exit'];
+          } else if(act==='duplex') {
+            msg=`设置接口 ${port} 双工 ${val||'auto'}`;
+            commands = [`interface ${port}`, `duplex ${val||'auto'}`, isHua?'quit':'exit'];
+          }
           break;
         }
         case 'interface-batch': {
           const range=v('cfg-if-range'), act=v('cfg-if-batch-action'), desc=v('cfg-if-batch-desc');
           if(!range){alert('填接口范围');return;}
-          const actMap={shutdown:'关闭',noshutdown:'开启',desc:'设置描述'};
-          msg=`在 ${dev} 上对接口 ${range} 批量${actMap[act]||act}`;
-          if(desc) msg+=`，描述"${desc}"`;
+          // 华为用 interface range，思科用 interface range
+          const ifCmd = isHua ? `interface range ${range}` : `interface range ${range}`;
+          if(act==='shutdown') { msg=`批量关闭 ${range}`; commands=[ifCmd,'shutdown','quit']; }
+          else if(act==='noshutdown') { msg=`批量开启 ${range}`; commands=[ifCmd,isHua?'undo shutdown':'no shutdown','quit']; }
+          else if(act==='desc') { msg=`批量设置描述`; commands=[ifCmd,`description ${desc}`,'quit']; }
           break;
         }
         case 'portmode': {
-          const port=v('cfg-pm-port'), mode=v('cfg-pm-mode'), vlan=v('cfg-pm-vlan'), allow=v('cfg-pm-allow'), native=v('cfg-pm-native');
+          const port=v('cfg-pm-port'), mode=v('cfg-pm-mode'), vlan=v('cfg-pm-vlan'), allow=v('cfg-pm-allow');
           if(!port){alert('填接口');return;}
-          if(mode==='access') msg=`在 ${dev} 上将接口 ${port} 设为 Access，VLAN ${vlan||'?'}`;
-          else { msg=`在 ${dev} 上将接口 ${port} 设为 Trunk`; if(allow) msg+=`，允许 VLAN ${allow}`; if(native) msg+=`，Native VLAN ${native}`; if(vlan) msg+=`，默认 VLAN ${vlan}`; }
-          break;
-        }
-        case 'portspecial': {
-          const sp=v('cfg-pm-special'), port=v('cfg-pm-sp-port'), grp=v('cfg-pm-sp-group');
-          if(!port||!grp){alert('填接口和组号');return;}
-          const map={'agg-lacp':'配置 LACP 端口聚合','agg-static':'配置静态端口聚合','mirror-src':'配置镜像源端口','mirror-dst':'配置镜像目的端口'};
-          msg=`在 ${dev} 上${map[sp]||sp}，接口 ${port}，组号 ${grp}`;
+          if(mode==='access') {
+            msg=`接口 ${port} → Access VLAN ${vlan||'?'}`;
+            if(isHua) commands=[`interface ${port}`,'port link-type access',vlan?`port access vlan ${vlan}`:'',isHua?'quit':'exit'].filter(Boolean);
+            else if(isCis) commands=[`interface ${port}`,'switchport mode access',vlan?`switchport access vlan ${vlan}`:'',isCis?'exit':'exit'].filter(Boolean);
+          } else {
+            msg=`接口 ${port} → Trunk` + (allow?` 允许VLAN ${allow}`:'');
+            if(isHua) commands=[`interface ${port}`,'port link-type trunk',allow?`port trunk permit vlan ${allow}`:'port trunk permit vlan all','quit'].filter(Boolean);
+            else if(isCis) commands=[`interface ${port}`,'switchport mode trunk',allow?`switchport trunk allowed vlan ${allow}`:'','exit'].filter(Boolean);
+          }
           break;
         }
         case 'l3-if': {
           const ft=v('cfg-l3-iftype'), iface=v('cfg-l3-iface'), ip=v('cfg-l3-ip');
           if(!iface||!ip){alert('填接口和 IP');return;}
-          const map={svi:'VLAN 接口',phy:'物理接口',loopback:'Loopback'};
-          msg=`在 ${dev} 上配置${map[ft]||ft} ${iface}，IP ${ip}`;
+          msg=`配置${ft==='svi'?'VLAN接口':ft==='loopback'?'Loopback':'物理接口'} ${iface}，IP ${ip}`;
+          if(isHua) commands=[`interface ${iface}`,`ip address ${ip}`,'quit'];
+          else if(isCis) commands=[`interface ${iface}`,`ip address ${ip}`,'exit'];
           break;
         }
         case 'l3-route': {
-          const dst=v('cfg-l3-rt-dst'), nh=v('cfg-l3-rt-nh'), pref=v('cfg-l3-rt-pref');
+          const dst=v('cfg-l3-rt-dst'), nh=v('cfg-l3-rt-nh');
           if(!dst||!nh){alert('填目标和下一跳');return;}
-          msg=`在 ${dev} 上配置静态路由，目标 ${dst}，下一跳 ${nh}`;
-          if(pref) msg+=`，优先级 ${pref}`;
+          msg=`静态路由 ${dst} → ${nh}`;
+          commands = isHua ? [`ip route-static ${dst} ${nh}`] : [`ip route ${dst} ${nh}`];
           break;
         }
         case 'l3-ospf': {
-          const id=v('cfg-l3-ospf-id'), net=v('cfg-l3-ospf-net');
+          const id=v('cfg-l3-ospf-id')||'1', net=v('cfg-l3-ospf-net');
           if(!net){alert('填网段');return;}
-          msg=`在 ${dev} 上配置 OSPF 进程 ${id||'1'}，宣告 ${net}`;
+          msg=`OSPF 进程 ${id} 宣告 ${net}`;
+          if(isHua) commands=[`ospf ${id}`,`network ${net}`,'quit'];
+          else if(isCis) commands=[`router ospf ${id}`,`network ${net} area 0`];
           break;
+        }
+        case 'ping': {
+          const ip=v('cfg-dg-ping'), c=v('cfg-dg-ping-c')||'5';
+          if(!ip){alert('填目标 IP');return;}
+          msg=`ping ${ip}`;
+          commands = [isHua?`ping ${ip} count ${c}`:`ping ${ip} repeat ${c}`];
+          break;
+        }
+        case 'traceroute': {
+          const ip=v('cfg-dg-trace');
+          if(!ip){alert('填目标');return;}
+          msg=`traceroute ${ip}`;
+          commands = [isHua?`tracert ${ip}`:`traceroute ${ip}`];
+          break;
+        }
+        default: {
+          // 其余复杂表单（BGP/DHCP/ACL/NAT/zone/sys）还是走 LLM
+          // 回退到原来的自然语言方式
+          return execFormLegacy(type, dev);
+        }
+      }
+
+      if(!commands.length && !msg) return;
+      const resultId = `cfg-${type}-result`;
+
+      // 判断是查询还是配置
+      const isQuery = commands.every(c => c.toLowerCase().startsWith('display') || c.toLowerCase().startsWith('show') || c.toLowerCase().startsWith('ping') || c.toLowerCase().startsWith('trac'));
+      
+      if(isQuery) {
+        // 查询直接执行
+        doExecDirect(dev, msg, commands, resultId);
+      } else {
+        // 配置走预览确认
+        doExecDirectWithPreview(dev, msg, commands, resultId);
+      }
+    }
+
+    async function doExecDirect(dev, msg, commands, resultId) {
+      const d = devices.find(x => x.id === selectedId);
+      const el = document.getElementById(resultId);
+      if(el){el.style.display='block';el.className='config-result';el.textContent='⏳ 执行中...';}
+      try {
+        const r = await fetch('/api/quick-config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          device: d?.name||d?.remark, mode:'execute', commands:[{device:d?.name||d?.remark, commands}]
+        })});
+        const res = await r.json();
+        const output = (res.results||[]).map(r => {
+          if(r.success && r.results) return r.results.map(x=>`命令: ${x.command}\n${x.output?.slice(0,2000)||''}`).join('\n---\n');
+          return r.error ? `❌ ${r.error}` : '';
+        }).filter(Boolean).join('\n---\n');
+        if(el){el.className=res.success?'config-result success':'config-result error';el.textContent=output||'完成';}
+        if(res.success) collectDeviceFacts(d?.name||d?.remark);
+      } catch(e) {
+        if(el){el.className='config-result error';el.textContent='请求失败';}
+      }
+    }
+
+    async function doExecDirectWithPreview(dev, msg, commands, resultId) {
+      const d = devices.find(x => x.id === selectedId);
+      const devLabel = d?.name||d?.remark;
+      const el = document.getElementById(resultId);
+
+      // 显示确认弹窗
+      let cmdListHtml = `<div style="margin-bottom:8px;"><div style="color:#22d3ee;font-size:12px;font-weight:600;">📌 设备: ${devLabel}</div>`;
+      cmdListHtml += `<div style="background:#0b1220;border:1px solid #334155;border-radius:4px;padding:6px 8px;margin-top:2px;font-family:monospace;font-size:11px;">`;
+      cmdListHtml += commands.map(c => `<div style="color:#e2e8f0;padding:1px 0;">${escapeHtml(c)}</div>`).join('');
+      cmdListHtml += `</div></div>`;
+
+      let confirmBox = document.getElementById('cfg-confirm-box');
+      if(!confirmBox){
+        confirmBox=document.createElement('div');confirmBox.id='cfg-confirm-box';
+        confirmBox.style.cssText='position:sticky;bottom:0;background:#1a1030;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin-top:8px;z-index:10;';
+        const panel=document.getElementById('config-panel');if(panel)panel.appendChild(confirmBox);
+      }
+      confirmBox.innerHTML=`
+        <div style="color:#f59e0b;font-size:13px;font-weight:600;margin-bottom:6px;">⚠️ ${msg} — 请确认后执行</div>
+        ${cmdListHtml}
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button id="btn-confirm-exec" style="flex:1;padding:8px;background:#dc2626;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">确认执行</button>
+          <button id="btn-cancel-exec" style="flex:1;padding:8px;background:#334155;color:#e5e7eb;border:none;border-radius:6px;cursor:pointer;">取消</button>
+        </div>`;
+      confirmBox.style.display='block';
+
+      document.getElementById('btn-confirm-exec').onclick = async () => {
+        confirmBox.style.display='none';
+        if(el){el.style.display='block';el.className='config-result';el.textContent='⏳ 执行中...';}
+        try {
+          const r = await fetch('/api/quick-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+            device:devLabel,mode:'execute',commands:[{device:devLabel,commands}]
+          })});
+          const res = await r.json();
+          const output = (res.results||[]).map(r => {
+            if(r.success&&r.results) return r.results.map(x=>`命令: ${x.command}\n${x.output?.slice(0,2000)||''}`).join('\n---\n');
+            return r.error?`❌ ${r.error}`:'';
+          }).filter(Boolean).join('\n---\n');
+          if(el){el.className=res.success?'config-result success':'config-result error';el.textContent=output||'完成';}
+          if(res.success) collectDeviceFacts(devLabel);
+        } catch(e) {
+          if(el){el.className='config-result error';el.textContent='执行失败';}
+        }
+      };
+      document.getElementById('btn-cancel-exec').onclick = () => {
+        confirmBox.style.display='none';
+        if(el){el.style.display='none';}
+      };
+    }
+
+    function execFormLegacy(type, dev) {
+      // 复杂表单回退走 LLM
+      const v = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+      let msg = '';
+      switch(type) {
+        case 'portspecial': {
+          const sp=v('cfg-pm-special'),port=v('cfg-pm-sp-port'),grp=v('cfg-pm-sp-group');
+          if(!port||!grp){alert('填接口和组号');return;}
+          const map={'agg-lacp':'配置 LACP 端口聚合','agg-static':'配置静态端口聚合','mirror-src':'配置镜像源端口','mirror-dst':'配置镜像目的端口'};
+          msg=`在 ${dev} 上${map[sp]||sp}，接口 ${port}，组号 ${grp}`; break;
         }
         case 'l3-bgp': {
-          const as=v('cfg-l3-bgp-as'), nbr=v('cfg-l3-bgp-nbr');
+          const as=v('cfg-l3-bgp-as'),nbr=v('cfg-l3-bgp-nbr');
           if(!as){alert('填 AS 号');return;}
-          msg=`在 ${dev} 上配置 BGP AS ${as}`; if(nbr) msg+=`，邻居 ${nbr}`;
-          break;
+          msg=`在 ${dev} 上配置 BGP AS ${as}`; if(nbr) msg+=`，邻居 ${nbr}`; break;
         }
         case 'l3-dhcp': {
-          const pool=v('cfg-l3-dhcp-pool'), net=v('cfg-l3-dhcp-net');
+          const pool=v('cfg-l3-dhcp-pool'),net=v('cfg-l3-dhcp-net');
           if(!pool||!net){alert('填地址池和网段');return;}
-          msg=`在 ${dev} 上配置 DHCP 地址池 ${pool}，${net}`;
-          break;
+          msg=`在 ${dev} 上配置 DHCP 地址池 ${pool}，${net}`; break;
         }
         case 'acl': {
-          const act=v('cfg-sec-acl-act'), rid=v('cfg-sec-acl-id'), perm=v('cfg-sec-acl-perm'), src=v('cfg-sec-acl-src'), dst=v('cfg-sec-acl-dst'), proto=v('cfg-sec-acl-proto'), iface=v('cfg-sec-acl-if');
+          const act=v('cfg-sec-acl-act'),rid=v('cfg-sec-acl-id'),perm=v('cfg-sec-acl-perm'),src=v('cfg-sec-acl-src'),dst=v('cfg-sec-acl-dst'),proto=v('cfg-sec-acl-proto'),iface=v('cfg-sec-acl-if');
           if(act==='delete'){if(!rid){alert('填规则号');return;} msg=`在 ${dev} 上删除 ACL 规则 ${rid}`; break;}
           if(!src&&!dst){alert('填源或目标');return;}
           msg=`在 ${dev} 上创建 ACL 规则 ${rid||'自动'}，${perm} ${src||'any'} → ${dst||'any'}`;
-          if(proto) msg+=` ${proto}`; if(iface) msg+=`，应用到 ${iface}`;
-          break;
+          if(proto) msg+=` ${proto}`; if(iface) msg+=`，应用到 ${iface}`; break;
         }
         case 'nat': {
-          const nt=v('cfg-sec-nat-type'), src=v('cfg-sec-nat-src'), ext=v('cfg-sec-nat-ext'), port=v('cfg-sec-nat-port');
+          const nt=v('cfg-sec-nat-type'),src=v('cfg-sec-nat-src'),ext=v('cfg-sec-nat-ext'),port=v('cfg-sec-nat-port');
           if(!src||!ext){alert('填内部地址和外部信息');return;}
           if(nt==='snat') msg=`在 ${dev} 上配置源 NAT，${src} 经 ${ext} 转换`;
-          else msg=`在 ${dev} 上配置目的 NAT，外部 ${ext}→${src}${port?' 端口 '+port:''}`;
-          break;
+          else msg=`在 ${dev} 上配置目的 NAT，外部 ${ext}→${src}${port?' 端口 '+port:''}`; break;
         }
         case 'zone': {
-          const act=v('cfg-sec-zone-act'), nm=v('cfg-sec-zone-name'), val=v('cfg-sec-zone-val');
+          const act=v('cfg-sec-zone-act'),nm=v('cfg-sec-zone-name'),val=v('cfg-sec-zone-val');
           if(!nm){alert('填域名');return;}
           const map={create:'创建安全域',addif:'将 '+val+' 加入安全域',policy:'配置域间策略'};
-          msg=`在 ${dev} 上${map[act]||act} ${nm}`; if(act==='policy') msg+=`：${val}`;
-          break;
+          msg=`在 ${dev} 上${map[act]||act} ${nm}`; if(act==='policy') msg+=`：${val}`; break;
         }
         case 'sys-name': { const nm=v('cfg-sys-name'); if(!nm){alert('填名称');return;} msg=`在 ${dev} 上设置设备名称为 ${nm}`; break; }
         case 'sys-mgmt': { const mg=v('cfg-sys-mgmt'); if(!mg){alert('填管理 IP');return;} msg=`在 ${dev} 上配置管理地址 ${mg}`; break; }
         case 'sys-sec': {
-          const act=v('cfg-sys-sec-act'), val=v('cfg-sys-sec-val');
+          const act=v('cfg-sys-sec-act'),val=v('cfg-sys-sec-val');
           const map={passwd:'设置 Console 密码',ssh:'启用 SSH 远程管理',telnet:'启用 Telnet 远程管理','acl-remote':'限制远程访问 IP 为 '+val};
-          msg=`在 ${dev} 上${map[act]||act}${act==='passwd'?' 密码 '+val:''}`;
-          break;
+          msg=`在 ${dev} 上${map[act]||act}${act==='passwd'?' 密码 '+val:''}`; break;
         }
-        case 'ping': { const ip=v('cfg-dg-ping'), c=v('cfg-dg-ping-c'); if(!ip){alert('填目标 IP');return;} msg=`在 ${dev} 上 ping ${ip}，次数 ${c||5}`; break; }
-        case 'traceroute': { const ip=v('cfg-dg-trace'); if(!ip){alert('填目标');return;} msg=`在 ${dev} 上 traceroute ${ip}`; break; }
       }
       if(!msg) return;
       const resultId = `cfg-${type}-result`;
@@ -1535,6 +1902,17 @@
     }
 
     async function doExec(dev, msg, resultId) {
+      // 判断是否为配置操作（需要预览确认）
+      const cfgWords = ['配置','创建','删除','关闭','shutdown','undo','撤销','开启','开启接口','关闭接口','Trunk','Access','静态路由','OSPF','BGP','NAT','DHCP','ACL','安全域','SSH','SNMP','端口聚合','镜像','描述'];
+      const isConfigOp = cfgWords.some(k => msg.includes(k));
+
+      if (isConfigOp) {
+        // 配置操作走预览确认流程
+        await doExecWithPreview(dev, msg, resultId);
+        return;
+      }
+
+      // 查询操作直接执行
       addMsg('user', msg);
       const el = document.getElementById(resultId);
       if(el){el.style.display='block';el.className='config-result';el.textContent='⏳ 执行中...';}
@@ -1551,6 +1929,106 @@
       } catch(e) {
         if(el){el.className='config-result error';el.textContent='请求失败';}
         addMsg('ai','❌ 请求失败: '+e.message);
+      }
+    }
+
+    async function doExecWithPreview(dev, msg, resultId) {
+      const el = document.getElementById(resultId);
+      if(el){el.style.display='block';el.className='config-result';el.textContent='⏳ 生成命令预览...';}
+      const d = devices.find(x => x.id === selectedId);
+      try {
+        // 第一步：预览，只生成命令不执行
+        const previewRes = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          message: msg,
+          context: {selected_device: d?.name||d?.remark},
+          preview_only: true
+        })});
+        const previewData = await previewRes.json();
+
+        if (!previewData.success && !previewData.preview) {
+          if(el){el.className='config-result error';el.textContent=previewData.message||'预览失败';}
+          return;
+        }
+
+        if (!previewData.preview || !previewData.planned_commands?.length) {
+          // LLM 没有生成工具调用（可能是纯文本回复），直接显示
+          addMsg('user', msg);
+          addMsg('ai', previewData.response || '无操作需要执行');
+          if(el){el.style.display='none';}
+          return;
+        }
+
+        // 第二步：显示确认弹窗
+        const cmds = previewData.planned_commands;
+        let cmdListHtml = '';
+        for (const item of cmds) {
+          cmdListHtml += `<div style="margin-bottom:8px;">`;
+          cmdListHtml += `<div style="color:#22d3ee;font-size:12px;font-weight:600;">📌 设备: ${item.device}</div>`;
+          if (item.commands?.length) {
+            cmdListHtml += `<div style="background:#0b1220;border:1px solid #334155;border-radius:4px;padding:6px 8px;margin-top:2px;font-family:monospace;font-size:11px;">`;
+            cmdListHtml += item.commands.map(c => `<div style="color:#e2e8f0;padding:1px 0;">${escapeHtml(c)}</div>`).join('');
+            cmdListHtml += `</div>`;
+          } else {
+            cmdListHtml += `<div style="color:#6b7280;font-size:11px;">（无具体命令）</div>`;
+          }
+          cmdListHtml += `</div>`;
+        }
+
+        // 用内联确认区域代替 confirm() 弹窗
+        let confirmBox = document.getElementById('cfg-confirm-box');
+        if (!confirmBox) {
+          confirmBox = document.createElement('div');
+          confirmBox.id = 'cfg-confirm-box';
+          confirmBox.style.cssText = 'position:sticky;bottom:0;background:#1a1030;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin-top:8px;z-index:10;';
+          const panel = document.getElementById('config-panel');
+          if (panel) panel.appendChild(confirmBox);
+        }
+        confirmBox.innerHTML = `
+          <div style="color:#f59e0b;font-size:13px;font-weight:600;margin-bottom:6px;">⚠️ 配置命令预览 — 请确认后执行</div>
+          ${cmdListHtml}
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button id="btn-confirm-exec" style="flex:1;padding:8px;background:#dc2626;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">确认执行</button>
+            <button id="btn-cancel-exec" style="flex:1;padding:8px;background:#334155;color:#e5e7eb;border:none;border-radius:6px;cursor:pointer;">取消</button>
+          </div>
+        `;
+        confirmBox.style.display = 'block';
+
+        if(el){el.style.display='none';}
+
+        // 确认按钮
+        document.getElementById('btn-confirm-exec').onclick = async () => {
+          confirmBox.style.display = 'none';
+          addMsg('user', msg);
+          if(el){el.style.display='block';el.className='config-result';el.textContent='⏳ 执行中...';}
+          try {
+            // 第三步：确认后直接执行命令
+            const execRes = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+              message: msg,
+              context: {selected_device: d?.name||d?.remark},
+              confirmed_commands: cmds
+            })});
+            const execData = await execRes.json();
+            if(el){
+              el.className = execData.success ? 'config-result success' : 'config-result error';
+              el.textContent = execData.response || execData.message || (execData.success?'成功':'失败');
+            }
+            addMsg('ai', (execData.success?'✅ ':'❌ ')+(execData.response||execData.message||''));
+            if(execData.success) collectDeviceFacts(d?.name||d?.remark);
+          } catch(e) {
+            if(el){el.className='config-result error';el.textContent='执行失败';}
+            addMsg('ai','❌ 执行失败: '+e.message);
+          }
+        };
+
+        // 取消按钮
+        document.getElementById('btn-cancel-exec').onclick = () => {
+          confirmBox.style.display = 'none';
+          if(el){el.style.display='none';}
+          addMsg('system', '⏹ 已取消配置操作');
+        };
+      } catch(e) {
+        if(el){el.className='config-result error';el.textContent='预览失败';}
+        addMsg('ai','❌ 预览请求失败: '+e.message);
       }
     }
 
@@ -1657,6 +2135,97 @@
         alert(res.message||'删除失败');
       }
     }
+
+    // 审计日志加载
+    async function loadAuditLogs() {
+      const container = document.getElementById('audit-logs');
+      container.innerHTML = '<div style="color:#6b7280;font-size:12px;">加载中...</div>';
+      try {
+        const r = await fetch('/api/audit/logs?limit=50');
+        const d = await r.json();
+        if (d.logs && d.logs.length > 0) {
+          container.innerHTML = d.logs.map(log => {
+            const cmds = log.details?.commands || [];
+            const cmdsHtml = cmds.length ? `<div style="color:#94a3b8;font-size:10px;margin-top:2px;font-family:monospace;">${cmds.map(c=>escapeHtml(c)).join(' → ')}</div>` : '';
+            const inputHtml = log.details?.input ? `<div style="color:#64748b;font-size:10px;margin-top:1px;">${escapeHtml(log.details.input)}</div>` : '';
+            return `
+            <div class="audit-item">
+              <div class="audit-time">${log.timestamp || ''}</div>
+              <div><span class="audit-action">${log.action || ''}</span> <span class="audit-target">${log.target || ''}</span></div>
+              ${inputHtml}${cmdsHtml}
+              <div class="${log.success ? 'audit-success' : 'audit-failed'}">${log.success ? '成功' : '失败: ' + (log.error || '')}</div>
+            </div>`;
+          }).join('');
+        } else {
+          container.innerHTML = '<div style="color:#6b7280;font-size:12px;">暂无审计日志</div>';
+        }
+      } catch (e) {
+        container.innerHTML = '<div style="color:#ef4444;font-size:12px;">加载失败</div>';
+      }
+    }
+
+    // 知识库统计加载
+    async function loadKnowledgeStats() {
+      const container = document.getElementById('knowledge-stats');
+      container.innerHTML = '<div style="color:#6b7280;font-size:12px;">加载中...</div>';
+      try {
+        const r = await fetch('/api/knowledge/stats');
+        const d = await r.json();
+        if (d.statistics) {
+          const s = d.statistics;
+          container.innerHTML = `
+            <div style="margin-bottom:12px;">
+              <div style="color:#94a3b8;font-size:11px;margin-bottom:4px;">统计信息</div>
+              <div style="color:#22d3ee;font-size:14px;font-weight:600;">总案例: ${s.total_cases || 0}</div>
+              <div style="color:#34d399;font-size:12px;">成功解决: ${s.successful_cases || 0}</div>
+            </div>
+            <div style="color:#94a3b8;font-size:11px;margin-bottom:4px;">常见解决方案</div>
+            ${s.common_solutions && s.common_solutions.length > 0 ? s.common_solutions.map(sol => `
+              <div class="knowledge-item">
+                <div class="knowledge-solution">${sol}</div>
+              </div>
+            `).join('') : '<div style="color:#6b7280;font-size:12px;">暂无数据</div>'}
+          `;
+        } else {
+          container.innerHTML = '<div style="color:#6b7280;font-size:12px;">暂无知识库数据</div>';
+        }
+      } catch (e) {
+        container.innerHTML = '<div style="color:#ef4444;font-size:12px;">加载失败</div>';
+      }
+    }
+  </script>
+
+  <!-- Socket.IO 实时推送 -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    (function() {
+      try {
+        const socket = io();
+        socket.on('diagnosis_step', function(data) {
+          const cls = data.status === 'PASS' ? 'msg-success' : data.status === 'FAIL' ? 'msg-error' : 'msg-system';
+          appendMsg(`🔍 ${data.step}: ${data.message}`, cls);
+        });
+        socket.on('progress', function(data) {
+          appendMsg(`⏳ 进度: ${data.current}/${data.total} (${data.percent}%) ${data.message}`, 'msg-system');
+        });
+        socket.on('command_result', function(data) {
+          const cls = data.success ? 'msg-success' : 'msg-error';
+          appendMsg(`📡 ${data.device} → ${data.command} (${data.duration}s)`, cls);
+        });
+        socket.on('diagnosis_complete', function(data) {
+          const cls = data.success ? 'msg-success' : 'msg-error';
+          appendMsg(`✅ 诊断完成: ${data.root_cause || '正常'}`, cls);
+          if (data.suggestions && data.suggestions.length) {
+            data.suggestions.forEach(s => appendMsg(`💡 ${s}`, 'msg-system'));
+          }
+        });
+        socket.on('notification', function(data) {
+          const icons = {info: 'ℹ️', warning: '⚠️', error: '❌'};
+          const cls = data.level === 'error' ? 'msg-error' : data.level === 'warning' ? 'msg-system' : 'msg-success';
+          appendMsg(`${icons[data.level]||'📢'} ${data.message}`, cls);
+        });
+      } catch(e) { /* Socket.IO not available, fallback to polling */ }
+    })();
   </script>
 </body>
 </html>

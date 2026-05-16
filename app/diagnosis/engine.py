@@ -9,8 +9,15 @@ from app.diagnosis.base import DiagnosisResult
 from app.diagnosis.vlan_checker import VLANChecker
 from app.diagnosis.routing_checker import RoutingChecker
 from app.diagnosis.connectivity_checker import ConnectivityChecker
+from app.diagnosis.stp_checker import STPChecker
+from app.diagnosis.interface_checker import InterfaceChecker
 from app.diagnosis.knowledge_base import KnowledgeBase, DiagnosisCase
 from app.core.device import Vendor
+
+try:
+    from web.ws_push import ProgressPusher
+except ImportError:
+    ProgressPusher = None
 
 
 class DiagnosisEngine:
@@ -26,7 +33,8 @@ class DiagnosisEngine:
         """
         self.llm_client = llm_client
         self.credential_manager = credential_manager
-        self.knowledge_base = KnowledgeBase()  # 新增知识库
+        self.knowledge_base = KnowledgeBase()
+        self.pusher = ProgressPusher() if ProgressPusher else None
     
     async def diagnose(self, diagnosis_type: str, params: Dict[str, Any], 
                        ssh_connection=None) -> DiagnosisResult:
@@ -43,7 +51,11 @@ class DiagnosisEngine:
         """
         # 提取问题描述（用于知识库搜索）
         problem = params.get("symptom", diagnosis_type)
-        
+
+        # 推送开始
+        if self.pusher:
+            self.pusher.push_notification('info', f'开始{diagnosis_type}诊断...')
+
         # 1. 先搜索相似案例
         similar_cases = self.knowledge_base.search_similar(problem)
         if similar_cases:
@@ -65,6 +77,14 @@ class DiagnosisEngine:
             checker = ConnectivityChecker(ssh_connection, self.llm_client)
             result = await checker.diagnose(**params)
         
+        elif diagnosis_type == "stp":
+            checker = STPChecker(ssh_connection, self.llm_client)
+            result = await checker.diagnose(**params)
+        
+        elif diagnosis_type == "interface":
+            checker = InterfaceChecker(ssh_connection, self.llm_client)
+            result = await checker.diagnose(**params)
+        
         else:
             result = DiagnosisResult(
                 success=False,
@@ -73,6 +93,11 @@ class DiagnosisEngine:
         
         # 3. 保存新案例
         if result.root_cause:
+            # 推送诊断完成
+            if self.pusher:
+                self.pusher.push_diagnosis_complete(
+                    result.root_cause, result.suggestions or [], result.success
+                )
             # 获取设备类型（从 SSH 连接或默认值）
             device_type = "unknown"
             if ssh_connection and hasattr(ssh_connection, 'device_type'):
@@ -81,12 +106,13 @@ class DiagnosisEngine:
             case = DiagnosisCase(
                 id=f"{datetime.now().strftime('%Y%m%d%H%M%S')}",
                 problem=problem,
-                symptoms=result.steps if hasattr(result, 'steps') and result.steps else [],
+                symptoms=[r.message for r in result.steps] if result.steps else [],
                 root_cause=result.root_cause,
-                solution=result.suggestions[0] if hasattr(result, 'suggestions') and result.suggestions else "",
+                solution=result.suggestions[0] if result.suggestions else "",
                 device_type=device_type,
                 timestamp=datetime.now().isoformat(),
-                success=result.success if hasattr(result, 'success') else True
+                success=result.success,
+                tags=[diagnosis_type],
             )
             self.knowledge_base.save_case(case)
         
@@ -147,11 +173,19 @@ class DiagnosisEngine:
         # VLAN相关关键词
         vlan_keywords = ["vlan", "部门", "网段", "不能上网", "上不了网", "局域网"]
         # 路由相关关键词
-        routing_keywords = ["路由", "ospf", "bgp", "路由器", "网关", "不通", "ping不通"]
+        routing_keywords = ["路由", "ospf", "bgp", "路由器", "网关", "ping不通"]
         # 连通性相关关键词
-        connectivity_keywords = ["ping", "连通", "访问", "连接", "丢包", "延迟"]
-        
-        if any(kw in symptom_lower for kw in vlan_keywords):
+        connectivity_keywords = ["ping", "连通", "访问", "连接", "丢包", "延迟", "不通"]
+        # STP/环路关键词
+        stp_keywords = ["stp", "环路", "广播风暴", "生成树", "拓扑变更", "mac地址漂移"]
+        # 接口关键词
+        interface_keywords = ["接口", "端口", "interface", "down", "up/down", "crc", "错包"]
+
+        if any(kw in symptom_lower for kw in stp_keywords):
+            return {"type": "stp", "params": {"symptom": symptom}}
+        elif any(kw in symptom_lower for kw in interface_keywords):
+            return {"type": "interface", "params": {"symptom": symptom}}
+        elif any(kw in symptom_lower for kw in vlan_keywords):
             return {"type": "vlan", "params": {"symptom": symptom}}
         elif any(kw in symptom_lower for kw in routing_keywords):
             return {"type": "routing", "params": {"symptom": symptom}}

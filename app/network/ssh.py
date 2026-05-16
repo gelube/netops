@@ -95,29 +95,99 @@ class DeviceConnection:
         except Exception as e:
             raise Exception(f"连接失败 {self.conn_info.ip}: {str(e)}")
     
+    # prompt/输出特征 → netmiko device_type 映射（用于快速检测）
+    PROMPT_VENDOR_MAP = [
+        (r'[<\[]\S+[>#\]]', 'huawei'),          # <SW-Core> or [SW-Core]
+        (r'\S+[>#]\s*$', 'cisco_ios'),           # SW-Core# or SW-Core>
+        (r'\S+:\S+[>#]', 'hp_comware'),           # H3C: <SW-Core> or SW-Core#
+        (r'\S+@[\w-]+>', 'juniper_junos'),        # user@router>
+        (r'\S+#\s*$', 'ruijie_os'),               # Ruijie#
+        (r'\S+>', 'arista_eos'),                   # arista>
+        (r'\S+#\s*$', 'cisco_nxos'),              # Nexus#
+    ]
+
+    # 版本输出关键词 → device_type 映射
+    VERSION_KEYWORDS_MAP = {
+        'huawei': ['huawei', 'vrp', 'versal', r's\d{4}', r'ar\d{4}', r'ne\d', 'usg'],
+        'hp_comware': ['h3c', 'comware', '3com', r's\d{4}', 'msr'],
+        'cisco_ios': ['cisco', 'ios', r'c\d{4}'],
+        'cisco_nxos': ['nx-os', 'nexus', 'nxos'],
+        'cisco_xr': ['ios-xr', 'ios xr'],
+        'juniper_junos': ['juniper', 'junos'],
+        'ruijie_os': ['ruijie', 'rgos'],
+        'arista_eos': ['arista', 'eos'],
+        'huawei_vrpv8': ['cloudengine', r'ce\d{4}', 'vrpv8'],
+        'fortinet': ['fortigate', 'fortios'],
+        'paloalto_panos': ['paloalto', 'pan-os'],
+    }
+
     def _get_device_type(self) -> str:
-        """获取netmiko设备类型"""
+        """获取netmiko设备类型 — 智能检测，不再暴力尝试17种类型"""
         if self.conn_info.device_type != "auto":
             return self.conn_info.device_type
-        
-        # 尝试自动检测
-        for vendor, dtype in self.VENDOR_DEVICE_TYPE_MAP.items():
+
+        # 策略1：用 autodetect（netmiko内置，1次连接搞定）
+        try:
+            from netmiko import SSHDetect
+            guesser = SSHDetect(
+                host=self.conn_info.ip,
+                port=self.conn_info.port,
+                username=self.conn_info.username,
+                password=self.conn_info.password,
+                timeout=15,
+            )
+            best_match = guesser.autodetect()
+            guesser.connection.disconnect()
+            if best_match:
+                return best_match
+        except Exception:
+            pass
+
+        # 策略2：用cisco_ios连一次，读版本信息本地判断
+        try:
+            temp_conn = ConnectHandler(
+                device_type='cisco_ios',
+                host=self.conn_info.ip,
+                port=self.conn_info.port,
+                username=self.conn_info.username,
+                password=self.conn_info.password,
+                timeout=15,
+            )
+            # 读提示符和版本
+            prompt = temp_conn.find_prompt() or ''
             try:
-                test_conn = ConnectHandler(
-                    device_type=dtype,
-                    host=self.conn_info.ip,
-                    port=self.conn_info.port,
-                    username=self.conn_info.username,
-                    password=self.conn_info.password,
-                    timeout=10,
-                )
-                test_conn.disconnect()
+                version_output = temp_conn.send_command_timing('show version', delay_factor=1, timeout=10)
+            except Exception:
+                version_output = ''
+            temp_conn.disconnect()
+
+            detected = self._detect_type_from_output(prompt, version_output)
+            if detected:
+                return detected
+        except Exception:
+            pass
+
+        # 默认cisco_ios
+        return 'cisco_ios'
+
+    @classmethod
+    def _detect_type_from_output(cls, prompt: str, version_output: str) -> str:
+        """从提示符和版本输出推断netmiko device_type"""
+        import re as _re
+        text = f'{prompt} {version_output}'.lower()
+
+        # 版本关键词匹配（优先）
+        for dtype, keywords in cls.VERSION_KEYWORDS_MAP.items():
+            for kw in keywords:
+                if _re.search(kw, text, _re.IGNORECASE):
+                    return dtype
+
+        # 提示符模式匹配
+        for pattern, dtype in cls.PROMPT_VENDOR_MAP:
+            if _re.search(pattern, prompt):
                 return dtype
-            except:
-                continue
-        
-        # 默认使用cisco_ios
-        return "cisco_ios"
+
+        return ''
     
     def _identify_vendor(self) -> Vendor:
         """识别厂商"""
@@ -294,28 +364,29 @@ def test_connection(ip: str, port: int = 22, timeout: int = 5) -> bool:
         return False
     finally:
         sock.close()
-    
-    def get_lldp_neighbors(self) -> List['NeighborInfo']:
-        """获取 LLDP/CDP 邻居信息"""
-        from app.network.lldp import LLDPNeighborParser
-        from app.network.commands import CommandBuilder
-        
-        try:
-            # 获取 LLDP 邻居
-            if self.vendor in [Vendor.HUAWEI, Vendor.H3C]:
-                output = self.execute_command(CommandBuilder.get_lldp_neighbor(self.vendor))
-            elif self.vendor == Vendor.CISCO:
-                # 思科先试 CDP
-                output = self.execute_command("show cdp neighbors detail")
-                if not output or "CDP is not enabled" in output:
-                    output = self.execute_command("show lldp neighbors detail")
-            else:
-                output = self.execute_command(CommandBuilder.get_lldp_neighbor(self.vendor))
-            
-            # 解析邻居信息
-            neighbors = LLDPNeighborParser.parse_lldp_neighbor(output, self.vendor)
-            return neighbors
-        
-        except Exception as e:
-            print(f"获取 LLDP 邻居失败：{e}")
-            return []
+
+
+def get_lldp_neighbors(connection: 'DeviceConnection') -> list:
+    """获取 LLDP/CDP 邻居信息（模块级函数）"""
+    from app.network.lldp import LLDPNeighborParser
+    from app.network.commands import CommandBuilder
+
+    try:
+        # 获取 LLDP 邻居
+        if connection.vendor in [Vendor.HUAWEI, Vendor.H3C]:
+            output = connection.execute_command(CommandBuilder.get_lldp_neighbor(connection.vendor))
+        elif connection.vendor == Vendor.CISCO:
+            # 思科先试 CDP
+            output = connection.execute_command("show cdp neighbors detail")
+            if not output or "CDP is not enabled" in output:
+                output = connection.execute_command("show lldp neighbors detail")
+        else:
+            output = connection.execute_command(CommandBuilder.get_lldp_neighbor(connection.vendor))
+
+        # 解析邻居信息
+        neighbors = LLDPNeighborParser.parse_lldp_neighbor(output, connection.vendor)
+        return neighbors
+
+    except Exception as e:
+        print(f"获取 LLDP 邻居失败：{e}")
+        return []

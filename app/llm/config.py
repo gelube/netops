@@ -5,8 +5,6 @@ import os
 import json
 from typing import List, Optional
 from pydantic import BaseModel, Field
-
-
 from enum import Enum
 
 
@@ -125,9 +123,7 @@ class LLMClient:
                 )
                 return response.content[0].text
             else:
-                # OpenAI 客户端支持 timeout 参数（秒）
-                import httpx
-                http_client = httpx.Client(timeout=timeout)
+                # 复用 _get_client() 返回的 OpenAI 客户端（已内置连接池），不再每次新建 httpx.Client
                 response = client.chat.completions.create(
                     model=self.config.model or "gpt-3.5-turbo",
                     messages=[
@@ -141,6 +137,116 @@ class LLMClient:
             # 超时或连接失败时返回 None，让调用方降级处理
             print(f"LLM 调用失败（可能超时）: {e}")
             return None
+
+    def chat(self, messages: list, tools: list = None, temperature: float = 0.7,
+             timeout: int = 30) -> dict:
+        """
+        完整对话接口 — 支持 function calling / tool use
+
+        Args:
+            messages: OpenAI 格式消息列表
+            tools: OpenAI 格式工具定义列表
+            temperature: 温度参数
+            timeout: 超时秒数
+
+        Returns:
+            {"content": str, "tool_calls": [...] 或 None}
+        """
+        client = self._get_client()
+
+        try:
+            if self.config.provider == "anthropic":
+                # Anthropic 的 tool use 格式不同，做适配
+                system_msg = ""
+                anthropic_msgs = []
+                for m in messages:
+                    if m["role"] == "system":
+                        system_msg = m["content"]
+                    else:
+                        anthropic_msgs.append(m)
+
+                kwargs = {
+                    "model": self.config.model or "claude-3-sonnet-20240229",
+                    "max_tokens": 2048,
+                    "messages": anthropic_msgs,
+                    "temperature": temperature,
+                    "timeout": timeout,
+                }
+                if system_msg:
+                    kwargs["system"] = system_msg
+
+                if tools:
+                    # 将 OpenAI tools 格式转为 Anthropic tools 格式
+                    claude_tools = []
+                    for t in tools:
+                        if t.get("type") == "function":
+                            func = t["function"]
+                            claude_tools.append({
+                                "name": func["name"],
+                                "description": func.get("description", ""),
+                                "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
+                            })
+                    if claude_tools:
+                        kwargs["tools"] = claude_tools
+
+                response = client.messages.create(**kwargs)
+
+                result = {"content": "", "tool_calls": None}
+                tool_calls = []
+                text_parts = []
+                for block in response.content:
+                    if block.type == "text":
+                        text_parts.append(block.text)
+                    elif block.type == "tool_use":
+                        tool_calls.append({
+                            "id": block.id,
+                            "type": "function",
+                            "function": {
+                                "name": block.name,
+                                "arguments": json.dumps(block.input),
+                            }
+                        })
+
+                result["content"] = "\n".join(text_parts)
+                result["tool_calls"] = tool_calls if tool_calls else None
+                return result
+
+            else:
+                # OpenAI 兼容格式（含 Ollama、阿里云等）
+                kwargs = {
+                    "model": self.config.model or "gpt-3.5-turbo",
+                    "messages": messages,
+                    "temperature": temperature,
+                }
+                if tools:
+                    kwargs["tools"] = tools
+
+                response = client.chat.completions.create(**kwargs)
+                choice = response.choices[0]
+
+                result = {
+                    "content": choice.message.content or "",
+                    "tool_calls": None,
+                }
+
+                if choice.message.tool_calls:
+                    result["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            }
+                        }
+                        for tc in choice.message.tool_calls
+                    ]
+
+                return result
+
+        except Exception as e:
+            print(f"LLM chat 调用失败: {e}")
+            return {"content": None, "tool_calls": None, "error": str(e)}
     
     def list_models(self) -> List[str]:
         """获取可用模型列表"""
