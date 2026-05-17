@@ -9,7 +9,10 @@ from dataclasses import dataclass
 
 try:
     from netmiko import ConnectHandler
-    from netmiko.exceptions import NetmikoTimeoutException, NetmikoAuthenticationException
+    from netmiko.exceptions import (
+        NetmikoTimeoutException,
+        NetmikoAuthenticationException,
+    )
 
     NETMIKO_AVAILABLE = True
 except ImportError:
@@ -91,7 +94,10 @@ class DeviceConnection:
 
         try:
             # 复用 autodetect 已建立的连接，避免重复连接
-            if self._autodetect_connection and self._autodetect_device_type == device_type:
+            if (
+                self._autodetect_connection
+                and self._autodetect_device_type == device_type
+            ):
                 self.connection = self._autodetect_connection
                 self._autodetect_connection = None  # 防止重复 disconnect
             else:
@@ -179,7 +185,9 @@ class DeviceConnection:
             # 读版本信息
             prompt = temp_conn.find_prompt() or ""
             try:
-                version_output = temp_conn.send_command_timing("show version", delay_factor=1, timeout=10)
+                version_output = temp_conn.send_command_timing(
+                    "show version", delay_factor=1, timeout=10
+                )
             except Exception as e:
                 log.debug("读取版本信息失败", error=str(e))
                 version_output = ""
@@ -224,8 +232,12 @@ class DeviceConnection:
     def _identify_vendor(self) -> Vendor:
         """识别厂商"""
         try:
-            version_output = self.execute_command(CommandBuilder.get_version(Vendor.UNKNOWN))
-            vendor, model, device_type = VendorIdentifier.identify_from_command_output(version_output)
+            version_output = self.execute_command(
+                CommandBuilder.get_version(Vendor.UNKNOWN)
+            )
+            vendor, model, device_type = VendorIdentifier.identify_from_command_output(
+                version_output
+            )
             return vendor
         except Exception as e:
             log.debug("识别厂商失败", error=str(e))
@@ -236,7 +248,9 @@ class DeviceConnection:
         if not self.connection:
             raise Exception("未连接设备")
 
-        output = self.connection.send_command_timing(command, delay_factor=1, timeout=timeout)
+        output = self.connection.send_command_timing(
+            command, delay_factor=1, timeout=timeout
+        )
         return output
 
     def disconnect(self) -> None:
@@ -251,8 +265,12 @@ class DeviceConnection:
 
         try:
             # 获取版本信息
-            version_output = self.execute_command(CommandBuilder.get_version(self.vendor))
-            vendor, model, device_type = VendorIdentifier.identify_from_command_output(version_output)
+            version_output = self.execute_command(
+                CommandBuilder.get_version(self.vendor)
+            )
+            vendor, model, device_type = VendorIdentifier.identify_from_command_output(
+                version_output
+            )
 
             device.vendor = vendor if vendor != Vendor.UNKNOWN else self.vendor
             device.model = model
@@ -306,7 +324,9 @@ class DeviceConnection:
         """填充接口信息"""
         try:
             # 获取IP接口信息
-            output = self.execute_command(CommandBuilder.get_ip_interface_brief(self.vendor))
+            output = self.execute_command(
+                CommandBuilder.get_ip_interface_brief(self.vendor)
+            )
             interfaces = self._parse_ip_interface_brief(output, self.vendor)
             device.interfaces.extend(interfaces)
         except Exception as e:
@@ -403,14 +423,18 @@ def get_lldp_neighbors(connection: "DeviceConnection") -> list:
     try:
         # 获取 LLDP 邻居
         if connection.vendor in [Vendor.HUAWEI, Vendor.H3C]:
-            output = connection.execute_command(CommandBuilder.get_lldp_neighbor(connection.vendor))
+            output = connection.execute_command(
+                CommandBuilder.get_lldp_neighbor(connection.vendor)
+            )
         elif connection.vendor == Vendor.CISCO:
             # 思科先试 CDP
             output = connection.execute_command("show cdp neighbors detail")
             if not output or "CDP is not enabled" in output:
                 output = connection.execute_command("show lldp neighbors detail")
         else:
-            output = connection.execute_command(CommandBuilder.get_lldp_neighbor(connection.vendor))
+            output = connection.execute_command(
+                CommandBuilder.get_lldp_neighbor(connection.vendor)
+            )
 
         # 解析邻居信息
         neighbors = LLDPNeighborParser.parse_lldp_neighbor(output, connection.vendor)

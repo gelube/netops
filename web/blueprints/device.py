@@ -62,7 +62,9 @@ def add_device():
             r = _add_single_device(d)
             results.append(r)
         ok = sum(1 for r in results if r.get("success"))
-        return jsonify({"success": True, "added": ok, "total": len(results), "results": results})
+        return jsonify(
+            {"success": True, "added": ok, "total": len(results), "results": results}
+        )
 
     # 单个添加
     result = _add_single_device(data)
@@ -100,13 +102,20 @@ def _add_single_device(data):
                         for other in devices:
                             if other.get("id") == device_id:
                                 continue
-                            if other.get("ip") == ip and int(other.get("port", 22)) == int(port):
-                                return {"success": False, "message": f"设备 {ip}:{port} 已存在"}
+                            if other.get("ip") == ip and int(
+                                other.get("port", 22)
+                            ) == int(port):
+                                return {
+                                    "success": False,
+                                    "message": f"设备 {ip}:{port} 已存在",
+                                }
                         d["ip"] = ip
                         d["port"] = int(port)
                     d["vendor"] = vendor
                     d["conn_type"] = conn_type
-                    d["device_type"] = data.get("device_type", d.get("device_type", "unknown"))
+                    d["device_type"] = data.get(
+                        "device_type", d.get("device_type", "unknown")
+                    )
                     d["remark"] = remark
                     d["username"] = username
                     d["password"] = password
@@ -194,7 +203,9 @@ def _auto_detect_device(ip, username, password, port=22, conn_type="ssh"):
                 conn = ConnectHandler(**conn_params)
 
                 # 免凭证 telnet 用原始通道（generic_termserver 不支持 send_command）
-                is_noauth_telnet = not username and not password and "telnet" in device_type
+                is_noauth_telnet = (
+                    not username and not password and "telnet" in device_type
+                )
 
                 if is_noauth_telnet:
                     # H3C/Huawei 免凭证：先中断 auto-config
@@ -215,11 +226,17 @@ def _auto_detect_device(ip, username, password, port=22, conn_type="ssh"):
                     prompt = conn.find_prompt() or ""
                     vendor = vendor_map.get(device_type, "unknown")
                     if vendor in ("huawei", "h3c"):
-                        output = conn.send_command_timing("display version", delay_factor=1)
+                        output = conn.send_command_timing(
+                            "display version", delay_factor=1
+                        )
                     elif vendor == "cisco":
-                        output = conn.send_command_timing("show version", delay_factor=1)
+                        output = conn.send_command_timing(
+                            "show version", delay_factor=1
+                        )
                     else:
-                        output = conn.send_command_timing("display version", delay_factor=1)
+                        output = conn.send_command_timing(
+                            "display version", delay_factor=1
+                        )
 
                 conn.disconnect()
 
@@ -338,7 +355,11 @@ def delete_device():
     original_len = len(devices)
 
     devices = [
-        d for d in devices if d.get("id") != device_id and d.get("remark") != device_name and d.get("ip") != device_name
+        d
+        for d in devices
+        if d.get("id") != device_id
+        and d.get("remark") != device_name
+        and d.get("ip") != device_name
     ]
 
     if len(devices) == original_len:
@@ -364,7 +385,11 @@ def device_collect():
         if device_id and d.get("id") == device_id:
             device = d
             break
-        if d.get("remark") == device_name or d.get("ip") == device_name or d.get("name") == device_name:
+        if (
+            d.get("remark") == device_name
+            or d.get("ip") == device_name
+            or d.get("name") == device_name
+        ):
             device = d
             break
 
@@ -375,7 +400,9 @@ def device_collect():
     commands = _get_collect_commands(vendor, collect_type)
     # 用设备名/备注/IP传给NetOpsTools
     dev_identifier = device.get("remark") or device.get("name") or device.get("ip")
-    result = tools.execute_tool("run_commands", {"device": dev_identifier, "commands": commands})
+    result = tools.execute_tool(
+        "run_commands", {"device": dev_identifier, "commands": commands}
+    )
 
     if result.get("success"):
         # 解析采集结果更新设备信息
@@ -394,7 +421,11 @@ def _get_collect_commands(vendor, collect_type):
     """获取采集命令列表"""
     if vendor in ("huawei", "h3c"):
         cmd_map = {
-            "all": ["display version", "display device", "display current-configuration"],
+            "all": [
+                "display version",
+                "display device",
+                "display current-configuration",
+            ],
             "version": ["display version"],
             "interface": ["display interface brief"],
             "arp": ["display arp"],
@@ -424,7 +455,9 @@ def _update_device_facts(device, results, vendor):
         output = r.get("output", "")
 
         if "version" in cmd:
-            vendor_result, model, dtype = VendorIdentifier.identify_from_command_output(output)
+            vendor_result, model, dtype = VendorIdentifier.identify_from_command_output(
+                output
+            )
             if vendor_result != VendorEnum.UNKNOWN:
                 device["vendor"] = vendor_result.value
             if model:
@@ -456,7 +489,11 @@ def device_ping():
     devices = _load_devices()
     dev = None
     for d in devices:
-        if d.get("remark") == device_name or d.get("ip") == device_name or d.get("name") == device_name:
+        if (
+            d.get("remark") == device_name
+            or d.get("ip") == device_name
+            or d.get("name") == device_name
+        ):
             dev = d
             break
     if not dev:
@@ -492,7 +529,11 @@ def device_facts():
 
     devices = _load_devices()
     for d in devices:
-        if d.get("remark") == device_name or d.get("ip") == device_name or d.get("name") == device_name:
+        if (
+            d.get("remark") == device_name
+            or d.get("ip") == device_name
+            or d.get("name") == device_name
+        ):
             return jsonify({"success": True, "facts": d.get("facts", {})})
 
     return jsonify({"success": False, "message": "设备不存在"})

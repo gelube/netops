@@ -210,7 +210,9 @@ class LinkTypeDetector:
 
     @staticmethod
     def detect_link_type(
-        interface_name: str, description: str = "", neighbor_info: Optional[NeighborInfo] = None
+        interface_name: str,
+        description: str = "",
+        neighbor_info: Optional[NeighborInfo] = None,
     ) -> PortType:
         """检测链路类型"""
         text = f"{interface_name} {description}".lower()
@@ -250,7 +252,9 @@ class LinkTypeDetector:
 
     @staticmethod
     def create_link_from_neighbor(
-        local_device_id: str, neighbor: NeighborInfo, port_type: PortType = PortType.NORMAL
+        local_device_id: str,
+        neighbor: NeighborInfo,
+        port_type: PortType = PortType.NORMAL,
     ) -> Link:
         """根据邻居信息创建链路"""
         return Link(

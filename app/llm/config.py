@@ -112,7 +112,9 @@ class LLMConfig(BaseModel):
         """从文件加载配置"""
         if config_dir is None:
             # 默认从项目 config 目录加载
-            config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
+            config_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config"
+            )
 
         config_path = os.path.join(config_dir, "llm_config.json")
 
@@ -166,7 +168,9 @@ class LLMClient:
                 # 配置连接池：超时+连接复用+keep-alive，防止CLOSE_WAIT泄漏
                 http_client = HttpxClient(
                     timeout=60.0,
-                    limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+                    limits=httpx.Limits(
+                        max_connections=10, max_keepalive_connections=5
+                    ),
                 )
                 self._client = OpenAI(
                     api_key=api_key,
@@ -179,7 +183,9 @@ class LLMClient:
 
         return self._client
 
-    def chat_simple(self, user_message: str, context: str = "", timeout: int = 10) -> str:
+    def chat_simple(
+        self, user_message: str, context: str = "", timeout: int = 10
+    ) -> str:
         """简单对话（带超时）"""
         client = self._get_client()
 
@@ -201,7 +207,10 @@ class LLMClient:
                 # 复用 _get_client() 返回的 OpenAI 客户端（已内置连接池），不再每次新建 httpx.Client
                 response = client.chat.completions.create(
                     model=self.config.model or "gpt-3.5-turbo",
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}],
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message},
+                    ],
                     timeout=timeout,
                 )
                 return response.choices[0].message.content
@@ -210,7 +219,13 @@ class LLMClient:
             log.error(f"LLM 调用失败（可能超时）: {e}")
             return None
 
-    def chat(self, messages: list, tools: list = None, temperature: float = 0.7, timeout: int = 30) -> dict:
+    def chat(
+        self,
+        messages: list,
+        tools: list = None,
+        temperature: float = 0.7,
+        timeout: int = 30,
+    ) -> dict:
         """
         完整对话接口 — 支持 function calling / tool use
 
@@ -256,7 +271,10 @@ class LLMClient:
                                 {
                                     "name": func["name"],
                                     "description": func.get("description", ""),
-                                    "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
+                                    "input_schema": func.get(
+                                        "parameters",
+                                        {"type": "object", "properties": {}},
+                                    ),
                                 }
                             )
                     if claude_tools:

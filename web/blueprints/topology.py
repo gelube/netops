@@ -156,14 +156,19 @@ def _extract_topology_links(text, local_name):
     # H3C/华为 list格式: 表格行
     # 格式1: "Local Interface  Chassis ID  Port ID  System Name"
     # 格式2: "LocalIf  Nbr chassis ID  Nbr port ID  Nbr system name"
-    if re.search(r"Local(?:If| Interface)\s+(?:Nbr\s+)?(?:Chassis|chassis)\s+ID", text, re.IGNORECASE):
+    if re.search(
+        r"Local(?:If| Interface)\s+(?:Nbr\s+)?(?:Chassis|chassis)\s+ID",
+        text,
+        re.IGNORECASE,
+    ):
         for line in text.strip().split("\n"):
             # 跳过表头行
-            if re.match(r'Local', line.strip(), re.IGNORECASE):
+            if re.match(r"Local", line.strip(), re.IGNORECASE):
                 continue
             # 尝试4列匹配（含System Name）
             m = re.match(
-                r"((?:GE|XGE|10GE|40GE|100GE|Eth|Ethernet|GigabitEthernet)\S+)\s+(\S+)\s+(\S+)\s+(\S+)", line.strip()
+                r"((?:GE|XGE|10GE|40GE|100GE|Eth|Ethernet|GigabitEthernet)\S+)\s+(\S+)\s+(\S+)\s+(\S+)",
+                line.strip(),
             )
             if m:
                 links.append(
@@ -178,7 +183,8 @@ def _extract_topology_links(text, local_name):
                 continue
             # 3列匹配（无System Name，用Chassis ID标识）
             m = re.match(
-                r"((?:GE|XGE|10GE|40GE|100GE|Eth|Ethernet|GigabitEthernet)\S+)\s+(\S+)\s+(\S+)", line.strip()
+                r"((?:GE|XGE|10GE|40GE|100GE|Eth|Ethernet|GigabitEthernet)\S+)\s+(\S+)\s+(\S+)",
+                line.strip(),
             )
             if m:
                 links.append(
@@ -201,17 +207,29 @@ def _extract_topology_links(text, local_name):
 
         # 华为 LLDP 格式
         if "Port identifier" in line or "local interface" in line.lower():
-            m = re.search(r"(GE|XGE|10GE|40GE|100GE|Eth|Ethernet)\d+(?:/\d+)*/\d+(?:\.\d+)?", line, re.IGNORECASE)
+            m = re.search(
+                r"(GE|XGE|10GE|40GE|100GE|Eth|Ethernet)\d+(?:/\d+)*/\d+(?:\.\d+)?",
+                line,
+                re.IGNORECASE,
+            )
             if m:
                 current_entry["local_port"] = m.group(0)
 
         elif "Neighbor interface" in line or "neighbor interface" in line.lower():
-            m = re.search(r"(GE|XGE|10GE|40GE|100GE|Eth|Ethernet)\d+(?:/\d+)*/\d+(?:\.\d+)?", line, re.IGNORECASE)
+            m = re.search(
+                r"(GE|XGE|10GE|40GE|100GE|Eth|Ethernet)\d+(?:/\d+)*/\d+(?:\.\d+)?",
+                line,
+                re.IGNORECASE,
+            )
             if m:
                 current_entry["neighbor_port"] = m.group(0)
 
         elif "Neighbor port id" in line or "port id" in line.lower():
-            m = re.search(r"(GE|XGE|10GE|40GE|100GE|Eth|Ethernet)\d+(?:/\d+)*/\d+(?:\.\d+)?", line, re.IGNORECASE)
+            m = re.search(
+                r"(GE|XGE|10GE|40GE|100GE|Eth|Ethernet)\d+(?:/\d+)*/\d+(?:\.\d+)?",
+                line,
+                re.IGNORECASE,
+            )
             if not m:
                 m = re.search(r"(Gi|Te|Fa)\d+/\d+", line, re.IGNORECASE)
             if m:
@@ -231,8 +249,14 @@ def _extract_topology_links(text, local_name):
             if m:
                 current_entry["neighbor_platform"] = m.group(1)
 
-        elif "Interface" in line and re.search(r"GigabitEthernet|FastEthernet|TenGig", line):
-            m = re.search(r"(GigabitEthernet|FastEthernet|TenGig|Gi|Te|Fa)\d+(?:/\d+)*(?:\.\d+)?", line, re.IGNORECASE)
+        elif "Interface" in line and re.search(
+            r"GigabitEthernet|FastEthernet|TenGig", line
+        ):
+            m = re.search(
+                r"(GigabitEthernet|FastEthernet|TenGig|Gi|Te|Fa)\d+(?:/\d+)*(?:\.\d+)?",
+                line,
+                re.IGNORECASE,
+            )
             if m:
                 if "local_port" not in current_entry:
                     current_entry["local_port"] = m.group(0)
@@ -240,7 +264,11 @@ def _extract_topology_links(text, local_name):
                     current_entry["neighbor_port"] = m.group(0)
 
         # 空行表示一条记录结束
-        if not line and current_entry.get("neighbor_name") and current_entry.get("local_port"):
+        if (
+            not line
+            and current_entry.get("neighbor_name")
+            and current_entry.get("local_port")
+        ):
             links.append(
                 {
                     "from_name": local_name,
@@ -303,15 +331,25 @@ def ensure_lldp_on_all_devices(devices, force=False):
 
             for cmds in cmds_list:
                 log.debug(f"LLDP discover: device={name}, vendor={vendor}, cmds={cmds}")
-                result = tools.execute_tool("run_commands", {"device": name, "commands": cmds})
+                result = tools.execute_tool(
+                    "run_commands", {"device": name, "commands": cmds}
+                )
                 if result.get("success") and result.get("results"):
                     lldp_text = result["results"][0].get("output", "")
                     # 检查是否命令失败（含错误提示）
                     if any(
                         err in lldp_text
-                        for err in ["Unrecognized command", "Invalid input", "% Error", "Error:", "Syntax error"]
+                        for err in [
+                            "Unrecognized command",
+                            "Invalid input",
+                            "% Error",
+                            "Error:",
+                            "Syntax error",
+                        ]
                     ):
-                        log.info(f"LLDP discover: {name} command failed for {cmds}, trying next")
+                        log.info(
+                            f"LLDP discover: {name} command failed for {cmds}, trying next"
+                        )
                         continue
                     d["lldp_neighbors"] = _extract_topology_links(lldp_text, name)
                     log.debug(
@@ -328,7 +366,9 @@ def ensure_lldp_on_all_devices(devices, force=False):
             log.warning(f"LLDP discover: {name} exception: {e}")
             updated.append(d)
 
-    log.info(f"ensure_lldp done: {sum(1 for d in updated if d.get('lldp_neighbors'))}/{len(devices)} devices have LLDP")
+    log.info(
+        f"ensure_lldp done: {sum(1 for d in updated if d.get('lldp_neighbors'))}/{len(devices)} devices have LLDP"
+    )
     return updated
 
 
@@ -343,7 +383,9 @@ def topology_discover():
 
     devices = _load_devices()
     if device_filter:
-        devices = [d for d in devices if (d.get("remark") or d.get("name")) in device_filter]
+        devices = [
+            d for d in devices if (d.get("remark") or d.get("name")) in device_filter
+        ]
 
     if not devices:
         return jsonify({"success": False, "message": "没有可发现的设备"})
@@ -413,7 +455,9 @@ def topology_discover():
     # 5. 构建边（从链路映射到节点ID）
     # 先建name/remark/sysname→id映射，sysname重复时不加入
     device_map = {d.get("name"): d.get("id") for d in devices}
-    device_map.update({d.get("remark"): d.get("id") for d in devices if d.get("remark")})
+    device_map.update(
+        {d.get("remark"): d.get("id") for d in devices if d.get("remark")}
+    )
     sysname_count = {}
     for d in devices:
         sn = d.get("sysname", "")
@@ -448,7 +492,9 @@ def topology_discover():
 
     edges = []
     if all_sysnames_same:
-        log.debug(f"discover: all sysnames same={sysname_count}, using cross-validation")
+        log.debug(
+            f"discover: all sysnames same={sysname_count}, using cross-validation"
+        )
         # 先尝试双向交叉验证
         for i, la in enumerate(uniq_links):
             for lb in uniq_links[i + 1 :]:
@@ -456,12 +502,17 @@ def topology_discover():
                 la_tp = _normalize_port(la.get("to_port", ""))
                 lb_fp = _normalize_port(lb.get("from_port", ""))
                 lb_tp = _normalize_port(lb.get("to_port", ""))
-                if la_fp == lb_tp and la_tp == lb_fp and la.get("to_name") == lb.get("to_name"):
+                if (
+                    la_fp == lb_tp
+                    and la_tp == lb_fp
+                    and la.get("to_name") == lb.get("to_name")
+                ):
                     fid = next(
                         (
                             d.get("id")
                             for d in devices
-                            if d.get("name") == la.get("from_name") or d.get("remark") == la.get("from_name")
+                            if d.get("name") == la.get("from_name")
+                            or d.get("remark") == la.get("from_name")
                         ),
                         None,
                     )
@@ -469,7 +520,8 @@ def topology_discover():
                         (
                             d.get("id")
                             for d in devices
-                            if d.get("name") == lb.get("from_name") or d.get("remark") == lb.get("from_name")
+                            if d.get("name") == lb.get("from_name")
+                            or d.get("remark") == lb.get("from_name")
                         ),
                         None,
                     )
@@ -489,7 +541,9 @@ def topology_discover():
                         )
         # 如果双向验证0链路，用chassis_id交叉匹配
         if not edges:
-            log.debug("discover: cross-validation found 0 links, trying chassis_id matching")
+            log.debug(
+                "discover: cross-validation found 0 links, trying chassis_id matching"
+            )
             # 构建chassis_id到设备名的映射：从所有链路中，同一chassis_id被多台设备看到
             # 说明这些设备连着同一台邻居（或互为邻居）
             cid_seen_by = {}  # chassis_id -> [(device_name, from_port, to_port)]
@@ -513,23 +567,75 @@ def topology_discover():
                         matched = False
                         if _normalize_port(tport_a) == _normalize_port(fport_b):
                             # A的邻居是B
-                            fid = next((d.get("id") for d in devices if d.get("name") == name_a or d.get("remark") == name_a), None)
-                            tid = next((d.get("id") for d in devices if d.get("name") == name_b or d.get("remark") == name_b), None)
+                            fid = next(
+                                (
+                                    d.get("id")
+                                    for d in devices
+                                    if d.get("name") == name_a
+                                    or d.get("remark") == name_a
+                                ),
+                                None,
+                            )
+                            tid = next(
+                                (
+                                    d.get("id")
+                                    for d in devices
+                                    if d.get("name") == name_b
+                                    or d.get("remark") == name_b
+                                ),
+                                None,
+                            )
                             if fid and tid:
-                                edges.append({"from": fid, "to": tid, "id": f"link_{len(edges) + 1}",
-                                    "from_name": name_a, "to_name": name_b,
-                                    "from_port": fport_a, "to_port": fport_b,
-                                    "link_type": "unknown", "protocol": "lldp"})
+                                edges.append(
+                                    {
+                                        "from": fid,
+                                        "to": tid,
+                                        "id": f"link_{len(edges) + 1}",
+                                        "from_name": name_a,
+                                        "to_name": name_b,
+                                        "from_port": fport_a,
+                                        "to_port": fport_b,
+                                        "link_type": "unknown",
+                                        "protocol": "lldp",
+                                    }
+                                )
                                 matched = True
-                        if not matched and _normalize_port(tport_b) == _normalize_port(fport_a):
+                        if not matched and _normalize_port(tport_b) == _normalize_port(
+                            fport_a
+                        ):
                             # B的邻居是A
-                            fid = next((d.get("id") for d in devices if d.get("name") == name_b or d.get("remark") == name_b), None)
-                            tid = next((d.get("id") for d in devices if d.get("name") == name_a or d.get("remark") == name_a), None)
+                            fid = next(
+                                (
+                                    d.get("id")
+                                    for d in devices
+                                    if d.get("name") == name_b
+                                    or d.get("remark") == name_b
+                                ),
+                                None,
+                            )
+                            tid = next(
+                                (
+                                    d.get("id")
+                                    for d in devices
+                                    if d.get("name") == name_a
+                                    or d.get("remark") == name_a
+                                ),
+                                None,
+                            )
                             if fid and tid:
-                                edges.append({"from": fid, "to": tid, "id": f"link_{len(edges) + 1}",
-                                    "from_name": name_b, "to_name": name_a,
-                                    "from_port": fport_b, "to_port": fport_a,
-                                    "link_type": "unknown", "protocol": "lldp"})
+                                edges.append(
+                                    {
+                                        "from": fid,
+                                        "to": tid,
+                                        "id": f"link_{len(edges) + 1}",
+                                        "from_name": name_b,
+                                        "to_name": name_a,
+                                        "from_port": fport_b,
+                                        "to_port": fport_a,
+                                        "link_type": "unknown",
+                                        "protocol": "lldp",
+                                    }
+                                )
     else:
         for link in uniq_links:
             fid = device_map.get(link.get("from_name"))
@@ -564,9 +670,13 @@ def topology_discover():
     with open(debug_path, "w", encoding="utf-8") as f:
         f.write(f"Links: {len(edges)}\n")
         for link in edges:
-            f.write(f"  {link['from_name']} {link['from_port']} -> {link['to_name']} {link['to_port']}\n")
+            f.write(
+                f"  {link['from_name']} {link['from_port']} -> {link['to_name']} {link['to_port']}\n"
+            )
 
-    return jsonify({"success": True, "nodes": len(nodes), "links": len(edges), "state": state})
+    return jsonify(
+        {"success": True, "nodes": len(nodes), "links": len(edges), "state": state}
+    )
 
 
 @topology_bp.route("/api/topology/apply", methods=["POST"])
@@ -579,6 +689,12 @@ def topology_apply():
 
     results = []
     for change in changes:
-        results.append({"change": change, "status": "skipped", "message": "暂不支持自动应用拓扑变更"})
+        results.append(
+            {
+                "change": change,
+                "status": "skipped",
+                "message": "暂不支持自动应用拓扑变更",
+            }
+        )
 
     return jsonify({"success": True, "results": results})

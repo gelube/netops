@@ -22,6 +22,7 @@ def _get_session_mgr():
     global _session_mgr
     if _session_mgr is None:
         from app.session import SessionManager
+
         session_dir = os.path.join(_data_dir, "sessions")
         _session_mgr = SessionManager(storage_dir=session_dir)
     return _session_mgr
@@ -57,7 +58,10 @@ def _get_device_list_str():
         devices = _load_devices()
         _device_list_cache["mtime"] = mtime
         _device_list_cache["devices_str"] = "\n".join(
-            [f"- {d.get('remark') or d.get('name')} ({d.get('ip')}, {d.get('vendor', 'unknown')})" for d in devices]
+            [
+                f"- {d.get('remark') or d.get('name')} ({d.get('ip')}, {d.get('vendor', 'unknown')})"
+                for d in devices
+            ]
         )
     return _device_list_cache["devices_str"]
 
@@ -83,7 +87,9 @@ def chat():
             result = _do_exec_confirmed(confirmed_commands, session_id)
             return jsonify(result)
 
-        result = _do_chat(message, selected_device, session_id, preview_only=preview_only)
+        result = _do_chat(
+            message, selected_device, session_id, preview_only=preview_only
+        )
         # 兼容前端：response = message
         if "message" in result and "response" not in result:
             result["response"] = result["message"]
@@ -124,21 +130,35 @@ def _do_exec_confirmed(confirmed_commands, session_id="default"):
         # 查找设备
         dev = None
         for d in devices:
-            if d.get("name") == dev_name or d.get("remark") == dev_name or d.get("ip") == dev_name:
+            if (
+                d.get("name") == dev_name
+                or d.get("remark") == dev_name
+                or d.get("ip") == dev_name
+            ):
                 dev = d
                 break
 
         if not dev:
-            all_results.append({"device": dev_name, "error": f"设备 {dev_name} 不存在", "success": False})
+            all_results.append(
+                {
+                    "device": dev_name,
+                    "error": f"设备 {dev_name} 不存在",
+                    "success": False,
+                }
+            )
             continue
 
         dev_info = CommandService.device_from_dict(dev)
-        cmd_result = cmd_svc.execute(dev_info, commands, user_id=session_id, source="confirmed")
+        cmd_result = cmd_svc.execute(
+            dev_info, commands, user_id=session_id, source="confirmed"
+        )
 
         if cmd_result.success:
             outputs = []
             for o in cmd_result.outputs:
-                outputs.append(f"命令: {o.get('command', '')}\n{o.get('output', '')[:500]}")
+                outputs.append(
+                    f"命令: {o.get('command', '')}\n{o.get('output', '')[:500]}"
+                )
             all_results.append(
                 {
                     "device": dev_name,
@@ -161,7 +181,9 @@ def _do_exec_confirmed(confirmed_commands, session_id="default"):
     summary_parts = []
     for r in all_results:
         if r.get("success"):
-            summary_parts.append(f"✅ {r['device']}: {len(r.get('results', []))} 条命令执行成功")
+            summary_parts.append(
+                f"✅ {r['device']}: {len(r.get('results', []))} 条命令执行成功"
+            )
         else:
             summary_parts.append(f"❌ {r['device']}: {r.get('error', '执行失败')}")
     summary = "\n".join(summary_parts)
@@ -363,18 +385,26 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
                 if commands:
                     # 预览模式：只收集命令不执行
                     if preview_only:
-                        planned_commands.append({"device": dev_name, "commands": commands})
+                        planned_commands.append(
+                            {"device": dev_name, "commands": commands}
+                        )
                         continue
 
                     # 查找设备
                     dev = None
                     for d in devices:
-                        if d.get("name") == dev_name or d.get("remark") == dev_name or d.get("ip") == dev_name:
+                        if (
+                            d.get("name") == dev_name
+                            or d.get("remark") == dev_name
+                            or d.get("ip") == dev_name
+                        ):
                             dev = d
                             break
                     if dev:
                         dev_info = CommandService.device_from_dict(dev)
-                        cmd_result = cmd_svc.execute(dev_info, commands, user_id=session_id, source="llm")
+                        cmd_result = cmd_svc.execute(
+                            dev_info, commands, user_id=session_id, source="llm"
+                        )
                         if not cmd_result.success:
                             results.append(
                                 {
@@ -399,7 +429,9 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
         # 预览模式：返回命令列表供确认
         if preview_only and planned_commands:
             session_mgr.add_turn(
-                session_id, TurnRole.ASSISTANT, f"预览命令: {json.dumps(planned_commands, ensure_ascii=False)}"
+                session_id,
+                TurnRole.ASSISTANT,
+                f"预览命令: {json.dumps(planned_commands, ensure_ascii=False)}",
             )
             return {
                 "success": True,
@@ -427,7 +459,9 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
                 for r in results
             ]
         )
-        session_mgr.add_turn(session_id, TurnRole.ASSISTANT, f"已执行工具，结果如下：\n{tool_summary}")
+        session_mgr.add_turn(
+            session_id, TurnRole.ASSISTANT, f"已执行工具，结果如下：\n{tool_summary}"
+        )
 
         return {
             "success": True,
@@ -486,7 +520,11 @@ def quick_config():
     devices = _load_devices()
     device = None
     for d in devices:
-        if d.get("name") == device_name or d.get("remark") == device_name or d.get("ip") == device_name:
+        if (
+            d.get("name") == device_name
+            or d.get("remark") == device_name
+            or d.get("ip") == device_name
+        ):
             device = d
             break
 
@@ -603,7 +641,10 @@ def quick_config():
                     {
                         "success": True,
                         "results": [
-                            {"command": r.get("command", ""), "output": r.get("output", "")}
+                            {
+                                "command": r.get("command", ""),
+                                "output": r.get("output", ""),
+                            }
                             for r in (cmd_result.outputs or [])
                         ],
                     }
@@ -615,9 +656,12 @@ def quick_config():
         return jsonify({"success": True, "matched": False})
 
     # 1. 模板优先
-    netmiko_type = {"huawei": "huawei", "h3c": "huawei", "cisco": "cisco_ios", "juniper": "juniper_junos"}.get(
-        vendor, "huawei"
-    )
+    netmiko_type = {
+        "huawei": "huawei",
+        "h3c": "huawei",
+        "cisco": "cisco_ios",
+        "juniper": "juniper_junos",
+    }.get(vendor, "huawei")
     from app.network.command_templates import TemplateMatcher
 
     template_commands = TemplateMatcher.match(
@@ -705,7 +749,11 @@ def api_diagnose():
     devices = _load_devices()
     device = None
     for d in devices:
-        if d.get("name") == device_name or d.get("remark") == device_name or d.get("ip") == device_name:
+        if (
+            d.get("name") == device_name
+            or d.get("remark") == device_name
+            or d.get("ip") == device_name
+        ):
             device = d
             break
 
@@ -717,7 +765,11 @@ def api_diagnose():
     # 获取诊断命令
     if vendor in ("huawei", "h3c"):
         cmd_map = {
-            "connectivity": ["display arp", "display mac-address", "display interface brief"],
+            "connectivity": [
+                "display arp",
+                "display mac-address",
+                "display interface brief",
+            ],
             "routing": ["display ip routing-table", "display ospf peer"],
             "vlan": ["display vlan", "display interface brief"],
             "interface": ["display interface", "display link-aggregation summary"],
@@ -791,7 +843,14 @@ def api_diagnose():
                     status = "WARNING"
                 message = f.replace("❌", "").replace("⚠️", "").replace("✅", "").strip()
                 finding_idx += 1
-            steps.append({"step": cmd, "status": status, "message": message, "suggestion": suggestion})
+            steps.append(
+                {
+                    "step": cmd,
+                    "status": status,
+                    "message": message,
+                    "suggestion": suggestion,
+                }
+            )
         result["steps"] = steps
         if fail_count > 0:
             result["root_cause"] = f"{diagnose_type}诊断发现 {fail_count} 个失败项"
@@ -817,7 +876,13 @@ def _analyze_diagnosis(results, diagnose_type):
         cmd = r.get("command", "")
 
         # 检测命令执行错误
-        error_sigs = ["wrong parameter", "unrecognized command", "incomplete command", "syntax error", "invalid input"]
+        error_sigs = [
+            "wrong parameter",
+            "unrecognized command",
+            "incomplete command",
+            "syntax error",
+            "invalid input",
+        ]
         if any(sig in output for sig in error_sigs):
             analysis["findings"].append("⚠️ 命令不支持或执行失败")
             continue
@@ -912,7 +977,8 @@ def api_snapshots():
                     "file": f,
                     "size": os.path.getsize(os.path.join(snapshot_dir, f)),
                     "time": time.strftime(
-                        "%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(os.path.join(snapshot_dir, f)))
+                        "%Y-%m-%d %H:%M:%S",
+                        time.localtime(os.path.getmtime(os.path.join(snapshot_dir, f))),
                     ),
                 }
             )
@@ -987,7 +1053,9 @@ def config_snapshot():
                 device = d
                 break
         if not device:
-            return jsonify({"success": False, "message": f"设备 {device_name or device_ip} 不存在"})
+            return jsonify(
+                {"success": False, "message": f"设备 {device_name or device_ip} 不存在"}
+            )
         dev_id = device.get("remark") or device.get("name") or device.get("ip")
         vendor = device.get("vendor", "huawei")
         # 选择配置命令
@@ -997,12 +1065,19 @@ def config_snapshot():
             cmd = "show running-config"
         else:
             cmd = "show running-config"
-        result = tools.execute_tool("run_commands", {"device": dev_id, "commands": [cmd]})
+        result = tools.execute_tool(
+            "run_commands", {"device": dev_id, "commands": [cmd]}
+        )
         if result.get("success") and result.get("results"):
             config = result["results"][0].get("output", "")
             device_ip = device.get("ip", device_ip)
         else:
-            return jsonify({"success": False, "message": f"采集配置失败: {result.get('message', '未知错误')}"})
+            return jsonify(
+                {
+                    "success": False,
+                    "message": f"采集配置失败: {result.get('message', '未知错误')}",
+                }
+            )
 
     if not device_ip or not config:
         return jsonify({"success": False, "message": "缺少 device_ip 或 config"})

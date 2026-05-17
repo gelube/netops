@@ -48,7 +48,9 @@ def _mask_to_cidr(mask: str) -> str:
     return "24"  # 默认 /24
 
 
-def _expand_interfaces(iface_str: str, vendor: str, context: Dict[str, Any] = None) -> Tuple[str, List[str]]:
+def _expand_interfaces(
+    iface_str: str, vendor: str, context: Dict[str, Any] = None
+) -> Tuple[str, List[str]]:
     """
     展开接口范围字符串
 
@@ -58,7 +60,20 @@ def _expand_interfaces(iface_str: str, vendor: str, context: Dict[str, Any] = No
     context参数可传入 {"interface_prefix": "XGE1/0/", "slot": "1"} 等设备特定信息
     """
     # 已有完整接口名
-    if any(iface_str.startswith(p) for p in ("GE", "Gigabit", "XGE", "10GE", "Eth", "Loop", "Vlan", "Port", "Bridge")):
+    if any(
+        iface_str.startswith(p)
+        for p in (
+            "GE",
+            "Gigabit",
+            "XGE",
+            "10GE",
+            "Eth",
+            "Loop",
+            "Vlan",
+            "Port",
+            "Bridge",
+        )
+    ):
         return iface_str, [iface_str]
 
     # 纯数字范围
@@ -76,7 +91,10 @@ def _expand_interfaces(iface_str: str, vendor: str, context: Dict[str, Any] = No
         elif vendor in ("hp_comware", "h3c"):
             iface_list = [f"GigabitEthernet1/0/{i}" for i in range(start, end + 1)]
             if len(iface_list) > 1:
-                return f"GigabitEthernet1/0/{start} to GigabitEthernet1/0/{end}", iface_list
+                return (
+                    f"GigabitEthernet1/0/{start} to GigabitEthernet1/0/{end}",
+                    iface_list,
+                )
             return iface_list[0], iface_list
         elif vendor in ("cisco_ios", "cisco_nxos", "ruijie_os", "arista_eos"):
             iface_list = [f"GigabitEthernet0/{i}" for i in range(start, end + 1)]
@@ -447,7 +465,9 @@ def _juniper_vlan_access(params: Dict[str, Any]) -> List[str]:
 
     cmds = ["configure", f"set vlans {vlan_name} vlan-id {vlan_id}"]
     for iface in iface_list:
-        cmds.append(f"set interfaces {iface} unit 0 family ethernet-switching vlan members {vlan_name}")
+        cmds.append(
+            f"set interfaces {iface} unit 0 family ethernet-switching vlan members {vlan_name}"
+        )
     cmds.extend(["commit", "exit"])
     return cmds
 
@@ -462,7 +482,9 @@ _TEMPLATES_BY_VENDOR_INTENT: Dict[str, Dict[str, List[CommandTemplate]]] = {}
 
 def _build_index():
     """构建模板索引"""
-    all_templates = HUAWEI_TEMPLATES + CISCO_TEMPLATES + H3C_TEMPLATES + JUNIPER_TEMPLATES
+    all_templates = (
+        HUAWEI_TEMPLATES + CISCO_TEMPLATES + H3C_TEMPLATES + JUNIPER_TEMPLATES
+    )
     for t in all_templates:
         key = f"{t.vendor}"
         if key not in _TEMPLATES_BY_VENDOR_INTENT:
@@ -492,7 +514,9 @@ class TemplateMatcher:
     }
 
     @classmethod
-    def match(cls, intent_type: str, vendor: str, parameters: Dict[str, Any]) -> Optional[List[str]]:
+    def match(
+        cls, intent_type: str, vendor: str, parameters: Dict[str, Any]
+    ) -> Optional[List[str]]:
         """
         尝试用模板生成命令
 
@@ -547,7 +571,9 @@ class TemplateMatcher:
     _CRITICAL_PARAMS = {"ip", "next_hop", "dest", "target_ip", "vlan_id"}
 
     @classmethod
-    def _params_match(cls, template: CommandTemplate, parameters: Dict[str, Any]) -> bool:
+    def _params_match(
+        cls, template: CommandTemplate, parameters: Dict[str, Any]
+    ) -> bool:
         """检查参数是否匹配模板需求
 
         规则：

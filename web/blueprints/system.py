@@ -41,7 +41,16 @@ def handle_llm_config():
             if data.get("base_url") and not data.get("endpoint"):
                 data["endpoint"] = data["base_url"]
             return jsonify({"success": True, **data})
-        return jsonify({"success": True, "provider": "", "model": "", "api_key": "", "base_url": "", "endpoint": ""})
+        return jsonify(
+            {
+                "success": True,
+                "provider": "",
+                "model": "",
+                "api_key": "",
+                "base_url": "",
+                "endpoint": "",
+            }
+        )
     else:
         data = request.json or {}
         config_file = os.path.join(_data_dir, "llm_config.json")
@@ -65,22 +74,32 @@ def test_llm():
     base_url = data.get("base_url", "") or data.get("endpoint", "")
 
     if not api_key and not base_url:
-        return jsonify({"success": False, "message": "API Key 或 Endpoint 不能同时为空"})
+        return jsonify(
+            {"success": False, "message": "API Key 或 Endpoint 不能同时为空"}
+        )
 
     try:
         if provider == "openai":
             import openai
 
             # 免凭证（Ollama等）：用占位符避免SDK报错
-            client = openai.OpenAI(api_key=api_key or "sk-no-key-required", base_url=base_url or None)
+            client = openai.OpenAI(
+                api_key=api_key or "sk-no-key-required", base_url=base_url or None
+            )
             resp = client.chat.completions.create(
                 model=model or "gpt-3.5-turbo",
-                messages=[{"role": "user", "content": "Hi, just testing. Reply with OK."}],
+                messages=[
+                    {"role": "user", "content": "Hi, just testing. Reply with OK."}
+                ],
                 max_tokens=10,
             )
-            return jsonify({"success": True, "message": resp.choices[0].message.content})
+            return jsonify(
+                {"success": True, "message": resp.choices[0].message.content}
+            )
         else:
-            return jsonify({"success": False, "message": f"不支持的 provider: {provider}"})
+            return jsonify(
+                {"success": False, "message": f"不支持的 provider: {provider}"}
+            )
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
 
@@ -92,7 +111,9 @@ def list_llm_models():
     if request.method == "GET":
         # GET: 从已保存配置读取
         try:
-            with open(os.path.join(_data_dir, "llm_config.json"), "r", encoding="utf-8") as f:
+            with open(
+                os.path.join(_data_dir, "llm_config.json"), "r", encoding="utf-8"
+            ) as f:
                 data = json.load(f)
         except Exception:
             return jsonify({"success": False, "message": "未配置LLM", "models": []})
@@ -107,12 +128,22 @@ def list_llm_models():
         if provider in ("openai", "custom"):
             import openai
 
-            client = openai.OpenAI(api_key=api_key or "sk-no-key-required", base_url=base_url)
+            client = openai.OpenAI(
+                api_key=api_key or "sk-no-key-required", base_url=base_url
+            )
             models = client.models.list()
-            model_ids = sorted([m.id for m in models.data]) if hasattr(models, "data") else []
+            model_ids = (
+                sorted([m.id for m in models.data]) if hasattr(models, "data") else []
+            )
             return jsonify({"success": True, "models": model_ids})
         else:
-            return jsonify({"success": False, "message": f"不支持的 provider: {provider}", "models": []})
+            return jsonify(
+                {
+                    "success": False,
+                    "message": f"不支持的 provider: {provider}",
+                    "models": [],
+                }
+            )
     except Exception as e:
         return jsonify({"success": False, "message": str(e), "models": []})
 
@@ -146,7 +177,9 @@ def get_knowledge_stats():
         stats = kb.get_stats()
         return jsonify({"success": True, "stats": stats})
     except Exception as e:
-        return jsonify({"success": True, "stats": {"total": 0, "categories": 0}, "error": str(e)})
+        return jsonify(
+            {"success": True, "stats": {"total": 0, "categories": 0}, "error": str(e)}
+        )
 
 
 @sys_bp.route("/api/knowledge/search", methods=["POST"])
@@ -245,11 +278,29 @@ def api_file_read():
         return jsonify({"success": False, "message": "只能读取项目目录下的文件"})
 
     # 不允许读取敏感文件
-    _SENSITIVE_EXTENSIONS = (".env", ".pem", ".key", ".pkcs12", ".p12", ".jks", ".keystore")
-    _SENSITIVE_NAMES = (".git", "credentials", "secret", "password", "private_key", "id_rsa", "id_ed25519")
+    _SENSITIVE_EXTENSIONS = (
+        ".env",
+        ".pem",
+        ".key",
+        ".pkcs12",
+        ".p12",
+        ".jks",
+        ".keystore",
+    )
+    _SENSITIVE_NAMES = (
+        ".git",
+        "credentials",
+        "secret",
+        "password",
+        "private_key",
+        "id_rsa",
+        "id_ed25519",
+    )
     _base_name = os.path.basename(abs_path).lower()
     if any(abs_path.lower().endswith(e) for e in _SENSITIVE_EXTENSIONS):
-        return jsonify({"success": False, "message": "不允许读取敏感文件（证书/密钥/环境配置）"})
+        return jsonify(
+            {"success": False, "message": "不允许读取敏感文件（证书/密钥/环境配置）"}
+        )
     if any(p in _base_name for p in _SENSITIVE_NAMES):
         return jsonify({"success": False, "message": "不允许读取敏感文件"})
 
@@ -284,9 +335,23 @@ def api_file_write():
         return jsonify({"success": False, "message": "只能写入项目目录下的文件"})
 
     # 不允许写入可执行文件和敏感配置文件
-    _BLOCKED_WRITE_EXTS = (".py", ".sh", ".bat", ".exe", ".cmd", ".ps1", ".env", ".pem", ".key", ".cfg", ".p12")
+    _BLOCKED_WRITE_EXTS = (
+        ".py",
+        ".sh",
+        ".bat",
+        ".exe",
+        ".cmd",
+        ".ps1",
+        ".env",
+        ".pem",
+        ".key",
+        ".cfg",
+        ".p12",
+    )
     if any(abs_path.lower().endswith(e) for e in _BLOCKED_WRITE_EXTS):
-        return jsonify({"success": False, "message": "不允许写入可执行文件或敏感配置文件"})
+        return jsonify(
+            {"success": False, "message": "不允许写入可执行文件或敏感配置文件"}
+        )
 
     try:
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)

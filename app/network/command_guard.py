@@ -202,7 +202,11 @@ class CommandGuard:
             if check.risk_level.value > result.max_risk.value:
                 result.max_risk = check.risk_level
 
-            if check.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL):
+            if check.risk_level in (
+                RiskLevel.MEDIUM,
+                RiskLevel.HIGH,
+                RiskLevel.CRITICAL,
+            ):
                 result.requires_backup = True
 
         return result
@@ -212,7 +216,9 @@ class CommandGuard:
         enters = self.VENDOR_CONFIG_ENTERS.get(self.vendor, [])
         return any(cmd.lower().strip().startswith(e) for e in enters)
 
-    def _check_single_command(self, cmd: str, in_config_mode: bool) -> CommandCheckResult:
+    def _check_single_command(
+        self, cmd: str, in_config_mode: bool
+    ) -> CommandCheckResult:
         """检查单条命令"""
         cmd_lower = cmd.lower()
 
@@ -277,7 +283,13 @@ class CommandGuard:
 
         if self.vendor in ("huawei", "huawei_vrpv8", "hp_comware"):
             return [f"{prefix} current-configuration"]
-        elif self.vendor in ("cisco_ios", "cisco_nxos", "cisco_xr", "ruijie_os", "arista_eos"):
+        elif self.vendor in (
+            "cisco_ios",
+            "cisco_nxos",
+            "cisco_xr",
+            "ruijie_os",
+            "arista_eos",
+        ):
             return [f"{prefix} running-config"]
         elif self.vendor == "juniper_junos":
             return [f"{prefix} configuration | display set"]
@@ -310,7 +322,9 @@ class CommandGuard:
                 lines.append(f"     └─ {w}")
 
         lines.append("")
-        lines.append(f"最高风险等级: {risk_emoji.get(guard_result.max_risk, '⚪')} {guard_result.max_risk.label}")
+        lines.append(
+            f"最高风险等级: {risk_emoji.get(guard_result.max_risk, '⚪')} {guard_result.max_risk.label}"
+        )
 
         if guard_result.blocked_commands:
             lines.append(f"🚫 被拦截的命令: {len(guard_result.blocked_commands)} 条")

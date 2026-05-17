@@ -61,7 +61,9 @@ class CommandResult:
     """命令执行结果"""
 
     success: bool
-    outputs: List[Dict[str, str]] = field(default_factory=list)  # [{"command": ..., "output": ...}]
+    outputs: List[Dict[str, str]] = field(
+        default_factory=list
+    )  # [{"command": ..., "output": ...}]
     error: str = ""
     blocked_commands: List[str] = field(default_factory=list)
     backup_id: str = ""
@@ -118,7 +120,11 @@ class CommandService:
                 guard = CommandGuard(vendor=device.netmiko_type)
                 guard_result = guard.check_commands(commands)
                 blocked = guard_result.blocked_commands
-                risk_level = guard_result.max_risk.label if hasattr(guard_result, "max_risk") else "unknown"
+                risk_level = (
+                    guard_result.max_risk.label
+                    if hasattr(guard_result, "max_risk")
+                    else "unknown"
+                )
 
                 if blocked:
                     audit_entry.result = "blocked"
@@ -179,7 +185,9 @@ class CommandService:
         """仅检查安全性，不执行"""
         return self.execute(device, commands, dry_run=True, auto_backup=False)
 
-    def _ssh_execute(self, device: DeviceInfo, commands: List[str]) -> List[Dict[str, str]]:
+    def _ssh_execute(
+        self, device: DeviceInfo, commands: List[str]
+    ) -> List[Dict[str, str]]:
         """通过 SSH/Telnet 执行命令，返回输出列表"""
         from app.network.ssh import DeviceConnection, ConnectionInfo
 
@@ -262,7 +270,9 @@ class CommandService:
                 filtered.append(line)
         return "\n".join(filtered)
 
-    def _backup_before_execute(self, device: DeviceInfo, commands: List[str], user_id: str):
+    def _backup_before_execute(
+        self, device: DeviceInfo, commands: List[str], user_id: str
+    ):
         """修改前自动备份当前配置"""
         try:
             from app.config_backup import get_backup_manager
@@ -284,9 +294,13 @@ class CommandService:
                 )
                 with DeviceConnection(conn_info) as conn:
                     if device.netmiko_type in ("huawei", "huawei_vrpv8", "hp_comware"):
-                        current_config = conn.execute_command("display current-configuration")
+                        current_config = conn.execute_command(
+                            "display current-configuration"
+                        )
                     elif device.netmiko_type == "juniper_junos":
-                        current_config = conn.execute_command("show configuration | display set")
+                        current_config = conn.execute_command(
+                            "show configuration | display set"
+                        )
                     else:
                         current_config = conn.execute_command("show running-config")
 
@@ -304,7 +318,9 @@ class CommandService:
             return None
 
     @staticmethod
-    def device_from_dict(device_dict: Dict[str, Any], credentials: Optional[Dict[str, str]] = None) -> DeviceInfo:
+    def device_from_dict(
+        device_dict: Dict[str, Any], credentials: Optional[Dict[str, str]] = None
+    ) -> DeviceInfo:
         """从设备字典（devices.json 格式）创建 DeviceInfo"""
         creds = credentials or {}
         return DeviceInfo(
