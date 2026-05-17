@@ -9,8 +9,12 @@ import sqlite3
 import json
 import re
 import os
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 from dataclasses import dataclass, asdict, field
+
+from app.logger import get_logger
+
+log = get_logger(__name__)
 
 
 @dataclass
@@ -100,10 +104,10 @@ def _build_fts_query(text: str) -> str:
     """
     构建FTS5查询：中文按字切分后用AND连接（提升精确度）
     英文词保持原样
-    
+
     "VLAN不通" → "VLAN AND 不 AND 通"
     "ping连不上网关" → "ping AND 连 AND 不 AND 上 AND 网 AND 关"
-    
+
     注意：保留"不"字，因为"不通"、"上不了网"中的"不"是否定语义关键词
     """
     # 分词
@@ -147,7 +151,7 @@ class KnowledgeBase:
             """)
             # FTS5：存case_id做关联，内容做分词预处理
             c.execute("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS cases_fts 
+                CREATE VIRTUAL TABLE IF NOT EXISTS cases_fts
                 USING fts5(case_id, content_text)
             """)
             c.execute("CREATE INDEX IF NOT EXISTS idx_device ON diagnosis_cases(device_type)")
@@ -160,7 +164,7 @@ class KnowledgeBase:
                 symptoms_json = json.dumps(case.symptoms, ensure_ascii=False)
                 tags_json = json.dumps(case.tags, ensure_ascii=False)
                 c.execute("""
-                    INSERT OR REPLACE INTO diagnosis_cases 
+                    INSERT OR REPLACE INTO diagnosis_cases
                     (id, problem, symptoms, root_cause, solution, device_type, timestamp, success, tags)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (case.id, case.problem, symptoms_json, case.root_cause,
@@ -178,7 +182,7 @@ class KnowledgeBase:
                 conn.commit()
             return True
         except Exception as e:
-            print(f"保存案例失败：{e}")
+            log.error("保存案例失败", error=str(e))
             return False
 
     def search(self, query: str, top_k: int = 5, device_type: str = None) -> List[Dict[str, Any]]:
@@ -213,7 +217,7 @@ class KnowledgeBase:
                 if case_ids:
                     placeholders = ','.join('?' * len(case_ids))
                     sql = f"""
-                        SELECT * FROM diagnosis_cases 
+                        SELECT * FROM diagnosis_cases
                         WHERE id IN ({placeholders})
                     """
                     params = list(case_ids)
@@ -231,7 +235,7 @@ class KnowledgeBase:
                     results = self._fallback_like_search(conn, query, top_k, device_type)
 
                 return results
-        except Exception as e:
+        except Exception:
             return self._fallback_like_search(None, query, top_k, device_type)
 
     def _fallback_like_search(self, conn, query: str, top_k: int = 5,
@@ -259,14 +263,23 @@ class KnowledgeBase:
             columns = tuple(desc[0] for desc in c.description)
             return [DiagnosisCase.from_row(row, columns).to_dict() for row in c.fetchall()]
         except Exception as e:
-            print(f"回退搜索失败：{e}")
+            log.warning("回退搜索失败", error=str(e))
             return []
 
     def search_similar(self, problem: str, top_k: int = 5) -> List[DiagnosisCase]:
-        """兼容旧接口"""
+        """兼容旧接口 — 返回DiagnosisCase列表"""
         results = self.search(problem, top_k)
-        return [DiagnosisCase(**{k: v for k, v in r.items() if k != 'relevance_score'})
-                for r in results]
+        cases = []
+        for r in results:
+            try:
+                # 过滤掉非DiagnosisCase字段
+                valid_keys = DiagnosisCase.__dataclass_fields__.keys()
+                filtered = {k: v for k, v in r.items() if k in valid_keys}
+                cases.append(DiagnosisCase(**filtered))
+            except Exception as e:
+                log.debug("跳过无效案例记录", error=str(e))
+                continue
+        return cases
 
     def get_common_solutions(self, device_type: str = None, limit: int = 10) -> List[Dict[str, Any]]:
         try:
@@ -285,7 +298,7 @@ class KnowledgeBase:
                         GROUP BY root_cause ORDER BY cnt DESC LIMIT ?
                     """, (limit,))
                 return [{"root_cause": row[0], "count": row[1]} for row in c.fetchall()]
-        except Exception as e:
+        except Exception:
             return []
 
     def get_stats(self) -> Dict[str, Any]:

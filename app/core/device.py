@@ -14,7 +14,7 @@ class Vendor(str, Enum):
     CISCO = "cisco"
     JUNIPER = "juniper"
     RUIJIE = "ruijie"
-    
+
     # 扩展厂商
     ARISTA = "arista"
     DELL = "dell"
@@ -29,7 +29,7 @@ class Vendor(str, Enum):
     HUAWEI_CLOUDENGINE = "huawei_ce"  # 华为数据中心交换机
     CISCO_NXOS = "cisco_nxos"  # Cisco Nexus
     CISCO_XR = "cisco_xr"  # Cisco IOS-XR
-    
+
     UNKNOWN = "unknown"
 
 
@@ -81,7 +81,7 @@ class Interface(BaseModel):
     description: Optional[str] = None
     vlan: Optional[int] = None
     mac: Optional[str] = None
-    
+
     # 邻居信息
     neighbor_device: Optional[str] = None
     neighbor_interface: Optional[str] = None
@@ -97,23 +97,23 @@ class Device(BaseModel):
     device_type: DeviceType = DeviceType.UNKNOWN
     os_version: str = ""
     serial_number: str = ""
-    
+
     # 接口信息
     interfaces: List[Interface] = Field(default_factory=list)
-    
+
     # 位置信息 (拓扑布局用)
     position_x: Optional[float] = None
     position_y: Optional[float] = None
-    
+
     # 额外信息
     management_vlan: Optional[int] = None
     vrrp_master: Optional[str] = None  # VRRP虚拟IP
-    
+
     def __init__(self, **data):
         super().__init__(**data)
         if not self.id:
             self.id = self.ip or self.name
-    
+
     @property
     def primary_ip(self) -> str:
         """获取主IP地址"""
@@ -125,7 +125,7 @@ class Device(BaseModel):
             if iface.ip:
                 return iface.ip.split('/')[0]
         return self.ip
-    
+
     @property
     def loopback_ip(self) -> str:
         """获取Loopback地址"""
@@ -142,10 +142,10 @@ class Link(BaseModel):
     target_device: str
     target_interface: str
     link_type: str = "physical"  # physical, aggregate, vrrp, stack, ospf, bgp, vpn
-    
+
     # 显示属性
     port_type: PortType = PortType.NORMAL
-    
+
     @property
     def display_name(self) -> str:
         return f"{self.source_interface} → {self.target_interface}"
@@ -155,59 +155,59 @@ class Topology(BaseModel):
     """拓扑模型"""
     devices: List[Device] = Field(default_factory=list)
     links: List[Link] = Field(default_factory=list)
-    
+
     def add_device(self, device: Device) -> None:
         """添加设备"""
         if not self.get_device(device.id):
             self.devices.append(device)
-    
+
     def add_link(self, link: Link) -> None:
         """添加链路"""
         self.links.append(link)
-    
+
     def get_device(self, device_id: str) -> Optional[Device]:
         """根据ID获取设备"""
         for dev in self.devices:
             if dev.id == device_id or dev.ip == device_id or dev.name == device_id:
                 return dev
         return None
-    
+
     def get_device_by_ip(self, ip: str) -> Optional[Device]:
         """根据IP获取设备"""
         return self.get_device(ip)
-    
+
     def get_neighbors(self, device_id: str) -> List[Device]:
         """获取邻居设备列表"""
         neighbors = []
         dev = self.get_device(device_id)
         if not dev:
             return []
-        
+
         for link in self.links:
             neighbor_id = None
             if link.source_device == device_id:
                 neighbor_id = link.target_device
             elif link.target_device == device_id:
                 neighbor_id = link.source_device
-            
+
             if neighbor_id:
                 neighbor = self.get_device(neighbor_id)
                 if neighbor and neighbor not in neighbors:
                     neighbors.append(neighbor)
-        
+
         return neighbors
-    
+
     def remove_device(self, device_id: str) -> bool:
         """删除设备及其关联链路"""
         # 找到并删除设备
         device = self.get_device(device_id)
         if not device:
             return False
-        
+
         self.devices.remove(device)
-        
+
         # 删除与该设备关联的所有链路
-        self.links = [link for link in self.links 
+        self.links = [link for link in self.links
                       if link.source_device != device_id and link.target_device != device_id]
-        
+
         return True

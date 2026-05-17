@@ -3,8 +3,7 @@
 """
 Web 诊断适配器 - 让诊断引擎可以复用 netops_tools 的 SSH 连接
 """
-import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 
 class WebSSHAdapter:
@@ -23,7 +22,8 @@ class WebSSHAdapter:
 
     def execute_command(self, command: str, timeout: int = 30) -> str:
         """执行命令，通过 netops_tools 公共接口"""
-        import sys, os
+        import sys
+        import os
         _web_dir = os.path.dirname(os.path.abspath(__file__))
         if _web_dir not in sys.path:
             sys.path.insert(0, _web_dir)

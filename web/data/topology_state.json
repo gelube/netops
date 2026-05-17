@@ -1,56 +1,50 @@
 {
   "nodes": [
     {
-      "id": "dev_4",
-      "name": "sw1",
-      "remark": "核心交换机",
+      "id": "dev_1778993309156",
+      "name": "SW1",
+      "label": "SW1",
+      "remark": "SW1",
       "ip": "127.0.0.1",
-      "deviceType": "layer3_switch",
-      "x": 789.3043478260869,
-      "y": 314.6851249850293
-    },
-    {
-      "id": "dev_5",
-      "name": "H3C",
-      "remark": "接入交换机",
-      "ip": "127.0.0.1",
-      "deviceType": "layer2_switch",
-      "x": 388.8352490421455,
-      "y": 310.37547892720295
-    },
-    {
-      "id": "dev_6",
-      "name": "H3C",
-      "remark": "出口路由",
-      "ip": "127.0.0.1",
+      "vendor": "h3c",
       "deviceType": "router",
-      "x": 789.9259259259269,
-      "y": 88.1494619061519
+      "x": 50,
+      "y": 99,
+      "facts": {
+        "model": "S685",
+        "version_output": "display version\nH3C Comware Software, Version 7.1.070, Alpha 7170\nCopyright (c) 2004-2022 New H3C Technologies Co., Ltd. All rights reserved.\nH3C S6850 uptime is 0 weeks, 0 days, 5 hours, 42 minutes\nLast reboot reason: User reboot\nBoot image: flash:/s6850-cmw710-boot-t7064p15.bin\nBoot image version: 7.1.070, Alpha 7170\n  Compiled Nov 21 2022 11:00:00\nBoot image: flash:/s6850-cmw710-system-t7064p15.bin\nBoot image version: 7.1.070, Alpha 7170\n  Compiled Nov 21 2022 11:00:00\n\nSlot 1:\nS6850 with 2 Processors\nBOARD TYPE: S6850\nDRAM:  512M bytes\nFLASH: 1024M bytes\nPCB 1 Version: VER.C\nBootrom Version: 908\nCPLD 1 Version: 002\nCPLD 2 Version: 002\nRelease Version: H3C S6850\nPatch Version: None\nReboot Cause: User reboot\n---- More ----",
+        "hostname": "H3C"
+      }
+    },
+    {
+      "id": "dev_1778993309159",
+      "name": "SW2",
+      "label": "SW2",
+      "remark": "SW2",
+      "ip": "127.0.0.1",
+      "vendor": "h3c",
+      "deviceType": "router",
+      "x": 308.66666666666674,
+      "y": 95.14814814814817,
+      "facts": {
+        "model": "S685",
+        "version_output": "display version\nH3C Comware Software, Version 7.1.070, Alpha 7170\nCopyright (c) 2004-2022 New H3C Technologies Co., Ltd. All rights reserved.\nH3C S6850 uptime is 0 weeks, 0 days, 5 hours, 35 minutes\nLast reboot reason: User reboot\nBoot image: flash:/s6850-cmw710-boot-t7064p15.bin\nBoot image version: 7.1.070, Alpha 7170\n  Compiled Nov 21 2022 11:00:00\nBoot image: flash:/s6850-cmw710-system-t7064p15.bin\nBoot image version: 7.1.070, Alpha 7170\n  Compiled Nov 21 2022 11:00:00\n\nSlot 1:\nS6850 with 2 Processors\nBOARD TYPE: S6850\nDRAM:  512M bytes\nFLASH: 1024M bytes\nPCB 1 Version: VER.C\nBootrom Version: 908\nCPLD 1 Version: 002\nCPLD 2 Version: 002\nRelease Version: H3C S6850\nPatch Version: None\nReboot Cause: User reboot\n---- More ----",
+        "hostname": "H3C"
+      }
     }
   ],
   "links": [
     {
-      "from": "dev_4",
-      "from_name": "核心交换机",
-      "from_port": "GE1/0/1",
+      "from": "dev_1778993309156",
+      "to": "dev_1778993309159",
       "id": "link_1",
-      "link_type": "unknown",
-      "protocol": "lldp",
-      "to": "dev_5",
-      "to_name": "接入交换机",
-      "to_port": "GE1/0/1"
-    },
-    {
-      "from": "dev_4",
-      "from_name": "核心交换机",
+      "from_name": "SW1",
+      "to_name": "SW2",
       "from_port": "GE1/0/2",
-      "id": "link_2",
+      "to_port": "GE1/0/1",
       "link_type": "unknown",
-      "protocol": "lldp",
-      "to": "dev_6",
-      "to_name": "出口路由",
-      "to_port": "GE0/0/0"
+      "protocol": "lldp"
     }
   ],
-  "version": 1426
+  "version": 1504
 }

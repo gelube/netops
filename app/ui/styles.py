@@ -10,31 +10,31 @@ class HacknetColors:
     BACKGROUND = "#000000"      # 纯黑
     BACKGROUND_LIGHT = "#0a0a0a"  # 深灰
     PANEL = "#111111"            # 面板背景
-    
+
     # 主色调
     PRIMARY = "#00FF00"          # 亮绿 - 主文字
     PRIMARY_DARK = "#008800"      # 深绿 - 次要文字
     SECONDARY = "#00FFFF"        # 青色 - 强调
-    
+
     # 功能色
     ACCENT = "#FF00FF"          # 霓虹粉 - 高亮
     WARNING = "#FFAA00"         # 橙色 - 警告
     ERROR = "#FF0000"           # 红色 - 错误
     SUCCESS = "#00FF00"          # 绿色 - 成功
-    
+
     # 特殊元素
     BORDER = "#00FF00"           # 边框
     BORDER_DIM = "#004400"       # 暗边框
     SELECTED = "#00FF00"         # 选中项
     FOCUS = "#00FFFF"            # 焦点
-    
+
     # 节点类型颜色
     NODE_ROUTER = "#00FF00"     # 路由器
     NODE_SWITCH = "#00FFFF"      # 交换机
     NODE_FIREWALL = "#FF6600"    # 防火墙
     NODE_SERVER = "#FF00FF"      # 服务器
     NODE_UNKNOWN = "#888888"     # 未知
-    
+
     # 链路颜色
     LINK_PHYSICAL = "#00FF00"   # 物理链路
     LINK_AGGREGATE = "#00FFFF"  # 聚合链路
@@ -46,7 +46,7 @@ class HacknetColors:
 
 class HacknetStyles:
     """Hacknet样式生成器"""
-    
+
     @staticmethod
     def get_base_style() -> Dict:
         """基础样式"""
@@ -54,7 +54,7 @@ class HacknetStyles:
             "background": HacknetColors.BACKGROUND,
             "color": HacknetColors.PRIMARY,
         }
-    
+
     @staticmethod
     def get_panel_style() -> Dict:
         """面板样式"""
@@ -63,7 +63,7 @@ class HacknetStyles:
             "color": HacknetColors.PRIMARY,
             "border": (HacknetColors.BORDER, "green"),
         }
-    
+
     @staticmethod
     def get_header_style() -> Dict:
         """标题样式"""
@@ -72,7 +72,7 @@ class HacknetStyles:
             "color": HacknetColors.PRIMARY,
             "text-style": "bold",
         }
-    
+
     @staticmethod
     def get_button_style(hover: bool = False) -> Dict:
         """按钮样式"""
@@ -87,7 +87,7 @@ class HacknetStyles:
             "color": HacknetColors.PRIMARY,
             "border": (HacknetColors.PRIMARY, "green"),
         }
-    
+
     @staticmethod
     def get_input_style() -> Dict:
         """输入框样式"""
@@ -96,7 +96,7 @@ class HacknetStyles:
             "color": HacknetColors.PRIMARY,
             "border": (HacknetColors.PRIMARY_DARK, "green"),
         }
-    
+
     @staticmethod
     def get_focus_style() -> Dict:
         """焦点样式"""
@@ -106,7 +106,7 @@ class HacknetStyles:
             "text-style": "bold",
             "border": (HacknetColors.FOCUS, "green"),
         }
-    
+
     @staticmethod
     def get_node_color(device_type: str) -> str:
         """获取设备节点颜色"""
@@ -119,7 +119,7 @@ class HacknetStyles:
             "unknown": HacknetColors.NODE_UNKNOWN,
         }
         return colors.get(device_type.lower(), HacknetColors.NODE_UNKNOWN)
-    
+
     @staticmethod
     def get_link_style(link_type: str) -> str:
         """获取链路颜色"""
@@ -146,31 +146,31 @@ DEVICE_ICONS = {
   ══╪═
     │
   └───┘""",
-    
+
     "switch_l3": """  ┌───┐
   │ ■ │
   ══╪═
   │ ■ │
   └───┘""",
-    
+
     "switch_l2": """  ┌───┐
   │ ■ │
   ══╪═
   │ ■ │
   └───┘""",
-    
+
     "firewall": """  ┌───┐
   │▓▓▓│
   ══╪═
   │▓▓▓│
   └───┘""",
-    
+
     "server": """  ┌───┐
   │╔═╗│
   │║▦║│
   │╚═╝│
   └───┘""",
-    
+
     "unknown": """  ┌───┐
   │ ? │
   ══╪═

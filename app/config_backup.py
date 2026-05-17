@@ -11,6 +11,10 @@ from typing import Optional, Dict, List, Any
 from pathlib import Path
 from dataclasses import dataclass
 
+from app.logger import get_logger
+
+log = get_logger(__name__)
+
 
 @dataclass
 class ConfigBackup:
@@ -25,11 +29,11 @@ class ConfigBackup:
 
 class ConfigBackupManager:
     """配置备份管理器"""
-    
+
     def __init__(self, backup_dir: Optional[str] = None):
         """
         初始化
-        
+
         Args:
             backup_dir: 备份目录
         """
@@ -40,16 +44,16 @@ class ConfigBackupManager:
             self.backup_dir = os.path.join(base_dir, datetime.now().strftime("%Y-%m-%d"))
         else:
             self.backup_dir = backup_dir
-        
+
         # 确保备份目录存在
         Path(self.backup_dir).mkdir(parents=True, exist_ok=True)
-        
+
         # 索引文件
         self.index_path = os.path.join(
             os.path.dirname(self.backup_dir),
             "backup_index.json"
         )
-    
+
     def backup_config(
         self,
         hostname: str,
@@ -58,26 +62,26 @@ class ConfigBackupManager:
     ) -> ConfigBackup:
         """
         备份配置
-        
+
         Args:
             hostname: 设备主机名
             config_content: 配置内容
             comment: 备份备注
-        
+
         Returns:
             ConfigBackup
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         config_hash = hashlib.sha256(config_content.encode("utf-8")).hexdigest()
-        
+
         # 生成备份文件名
         filename = f"{hostname}_{timestamp}.cfg"
         backup_path = os.path.join(self.backup_dir, filename)
-        
+
         # 保存配置
         with open(backup_path, "w", encoding="utf-8") as f:
             f.write(config_content)
-        
+
         # 创建备份记录
         backup = ConfigBackup(
             hostname=hostname,
@@ -87,29 +91,29 @@ class ConfigBackupManager:
             backup_path=backup_path,
             comment=comment,
         )
-        
+
         # 更新索引
         self._add_to_index(backup)
-        
+
         return backup
-    
+
     def get_backups(self, hostname: str, limit: int = 10) -> List[ConfigBackup]:
         """
         获取设备的备份历史
-        
+
         Args:
             hostname: 设备主机名
             limit: 返回数量限制
-        
+
         Returns:
             备份列表（按时间倒序）
         """
         index = self._load_index()
         backups = index.get(hostname, [])
-        
+
         # 按时间倒序
         backups.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-        
+
         # 返回最近的 limit 个
         result = []
         for b in backups[:limit]:
@@ -121,9 +125,9 @@ class ConfigBackupManager:
                 backup_path=b["backup_path"],
                 comment=b.get("comment", ""),
             ))
-        
+
         return result
-    
+
     def restore_backup(self, backup: ConfigBackup) -> str:
         """
         恢复备份（返回配置内容）
@@ -139,7 +143,7 @@ class ConfigBackupManager:
                 return f.read()
 
         raise FileNotFoundError(f"备份文件不存在：{backup.backup_path}")
-    
+
     def compare_backups(
         self,
         backup1: ConfigBackup,
@@ -231,14 +235,14 @@ class ConfigBackupManager:
             "total_changes": len(diff_sections),
             "sections": diff_sections,
         }
-    
+
     def _add_to_index(self, backup: ConfigBackup) -> None:
         """添加到索引"""
         index = self._load_index()
-        
+
         if backup.hostname not in index:
             index[backup.hostname] = []
-        
+
         index[backup.hostname].append({
             "timestamp": backup.timestamp,
             "config_hash": backup.config_hash,
@@ -246,19 +250,20 @@ class ConfigBackupManager:
             "comment": backup.comment,
             # 不再在索引中存 config_content（文件已有，避免索引膨胀）
         })
-        
+
         self._save_index(index)
-    
+
     def _load_index(self) -> Dict[str, List[Dict]]:
         """加载索引"""
         if os.path.exists(self.index_path):
             try:
                 with open(self.index_path, "r", encoding="utf-8") as f:
                     return json.load(f)
-            except Exception:
+            except Exception as e:
+                log.error("加载备份索引失败", error=str(e))
                 pass
         return {}
-    
+
     def _save_index(self, index: Dict[str, List[Dict]]) -> None:
         """保存索引"""
         with open(self.index_path, "w", encoding="utf-8") as f:

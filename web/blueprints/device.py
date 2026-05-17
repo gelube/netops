@@ -1,10 +1,18 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 设备蓝图 - 设备CRUD、发现、信息采集
 """
 from flask import Blueprint, request, jsonify
-import json, os, re, time, subprocess
+import json
+import os
+import re
+import time
+from datetime import datetime
+
+from app.logger import get_logger
+
+log = get_logger(__name__)
 
 device_bp = Blueprint('device', __name__)
 
@@ -55,9 +63,10 @@ def add_device():
 
 
 def _add_single_device(data):
-    """添加单个设备"""
+    """添加或更新单个设备"""
+    device_id = data.get('device_id', '')
+    basic_only = data.get('basic_only', False)
     ip = data.get('ip', '').strip()
-    name = data.get('name', '').strip()
     remark = data.get('remark', '').strip()
     username = data.get('username', '')
     password = data.get('password', '')
@@ -66,28 +75,58 @@ def _add_single_device(data):
     conn_type = data.get('conn_type', 'ssh')
     auto_detect = data.get('auto_detect', False)
 
-    if not ip and not name:
-        return {'success': False, 'message': 'IP 或设备名不能为空'}
-
     devices = _load_devices()
 
-    # 去重
+    # 编辑模式：更新已有设备
+    if device_id:
+        for i, d in enumerate(devices):
+            if d.get('id') == device_id:
+                if basic_only:
+                    # 仅更新基本信息（凭证/备注）
+                    d['username'] = username
+                    d['password'] = password
+                    d['remark'] = remark
+                else:
+                    # 全量更新
+                    if ip:
+                        # 去重检查（排除自身）
+                        for other in devices:
+                            if other.get('id') == device_id:
+                                continue
+                            if other.get('ip') == ip and int(other.get('port', 22)) == int(port):
+                                return {'success': False, 'message': f'设备 {ip}:{port} 已存在'}
+                        d['ip'] = ip
+                        d['port'] = int(port)
+                    d['vendor'] = vendor
+                    d['conn_type'] = conn_type
+                    d['device_type'] = data.get('device_type', d.get('device_type', 'unknown'))
+                    d['remark'] = remark
+                    d['username'] = username
+                    d['password'] = password
+                _save_devices(devices)
+                return {'success': True, 'device': d}
+        return {'success': False, 'message': f'设备 {device_id} 不存在'}
+
+    # 新增模式
+    if not ip:
+        return {'success': False, 'message': 'IP 不能为空'}
+
+    # 去重：IP+端口组合唯一
     for d in devices:
-        if d.get('ip') == ip or (name and d.get('name') == name):
-            return {'success': False, 'message': f'设备 {ip or name} 已存在'}
+        if d.get('ip') == ip and int(d.get('port', 22)) == int(port):
+            return {'success': False, 'message': f'设备 {ip}:{port} 已存在'}
 
     # 自动发现
     if auto_detect and ip:
-        detected = _auto_detect_device(ip, username, password, port)
+        detected = _auto_detect_device(ip, username, password, port, conn_type)
         if detected:
             vendor = detected.get('vendor', vendor)
-            name = name or detected.get('hostname', '')
             remark = remark or detected.get('hostname', '')
 
     device_id = f"dev_{int(time.time()*1000)}"
     device = {
         'id': device_id,
-        'name': name or ip,
+        'name': remark or ip,  # name保留为兼容字段，值=remark或IP
         'ip': ip,
         'port': int(port),
         'username': username,
@@ -95,7 +134,7 @@ def _add_single_device(data):
         'vendor': vendor,
         'conn_type': conn_type,
         'remark': remark,
-        'device_type': 'unknown',
+        'device_type': data.get('device_type', 'unknown'),
         'facts': {},
     }
 
@@ -104,35 +143,95 @@ def _add_single_device(data):
     return {'success': True, 'device': device}
 
 
-def _auto_detect_device(ip, username, password, port=22):
+def _auto_detect_device(ip, username, password, port=22, conn_type='ssh'):
     """自动探测设备厂商和型号"""
     try:
         from netmiko import ConnectHandler
-        # 先试华为
-        for device_type in ['huawei', 'cisco_ios', 'hp_comware', 'juniper_junos']:
+
+        # 根据连接方式选择探测类型序列
+        if conn_type == 'telnet' or (port not in (22, 2222) and port >= 23):
+            # Telnet 免凭证：厂商驱动强制认证，只能用 generic_termserver_telnet
+            if not username and not password:
+                probe_types = ['generic_termserver_telnet']
+            else:
+                probe_types = ['hp_comware_telnet', 'huawei_telnet', 'cisco_ios_telnet']
+        else:
+            probe_types = ['huawei', 'cisco_ios', 'hp_comware', 'juniper_junos']
+
+        vendor_map = {
+            'huawei': 'huawei', 'cisco_ios': 'cisco', 'hp_comware': 'h3c', 'juniper_junos': 'juniper',
+            'huawei_telnet': 'huawei', 'cisco_ios_telnet': 'cisco', 'hp_comware_telnet': 'h3c',
+            'generic_termserver_telnet': 'unknown',
+        }
+
+        for device_type in probe_types:
             try:
-                conn = ConnectHandler(
-                    device_type=device_type,
-                    host=ip, port=port,
-                    username=username, password=password,
-                    timeout=10, conn_timeout=8,
-                )
-                prompt = conn.find_prompt() or ''
-                if device_type == 'huawei':
-                    output = conn.send_command_timing('display version', delay_factor=1, timeout=10)
+                conn_params = {
+                    'device_type': device_type,
+                    'host': ip,
+                    'port': port,
+                    'timeout': 10,
+                    'conn_timeout': 8,
+                }
+                # 免凭证不需要username/password
+                if username:
+                    conn_params['username'] = username
+                if password:
+                    conn_params['password'] = password
+
+                conn = ConnectHandler(**conn_params)
+
+                # 免凭证 telnet 用原始通道（generic_termserver 不支持 send_command）
+                is_noauth_telnet = (not username and not password and 'telnet' in device_type)
+
+                if is_noauth_telnet:
+                    # H3C/Huawei 免凭证：先中断 auto-config
+                    import time
+                    conn.write_channel("\x03")  # Ctrl+C
+                    time.sleep(2)
+                    conn.write_channel("\n")
+                    time.sleep(1)
+                    conn.read_channel()  # 丢弃提示
+
+                    # 发送版本命令
+                    conn.write_channel("display version\n")
+                    time.sleep(3)
+                    output = conn.read_channel()
+                    prompt = ''
                 else:
-                    output = conn.send_command_timing('show version', delay_factor=1, timeout=10)
+                    prompt = conn.find_prompt() or ''
+                    vendor = vendor_map.get(device_type, 'unknown')
+                    if vendor in ('huawei', 'h3c'):
+                        output = conn.send_command_timing('display version', delay_factor=1)
+                    elif vendor == 'cisco':
+                        output = conn.send_command_timing('show version', delay_factor=1)
+                    else:
+                        output = conn.send_command_timing('display version', delay_factor=1)
+
                 conn.disconnect()
 
+                # 免凭证 telnet 从输出推断厂商
+                if is_noauth_telnet:
+                    if 'H3C' in output or 'Comware' in output:
+                        vendor = 'h3c'
+                    elif 'Huawei' in output:
+                        vendor = 'huawei'
+                    elif 'Cisco' in output:
+                        vendor = 'cisco'
+                    else:
+                        vendor = 'unknown'
+                else:
+                    vendor = vendor_map.get(device_type, 'unknown')
+
                 hostname = prompt.strip('<>[]#>').strip()
-                vendor_map = {'huawei': 'huawei', 'cisco_ios': 'cisco', 'hp_comware': 'h3c', 'juniper_junos': 'juniper'}
 
                 return {
-                    'vendor': vendor_map.get(device_type, device_type),
+                    'vendor': vendor,
                     'hostname': hostname,
                     'version_output': output[:500],
                 }
-            except Exception:
+            except Exception as e:
+                log.debug("探测设备类型失败", device_type=device_type, error=str(e))
                 continue
     except ImportError:
         pass
@@ -141,7 +240,6 @@ def _auto_detect_device(ip, username, password, port=22):
 
 def identify_device(device):
     """识别设备厂商和型号"""
-    from app.core.device import Vendor, DeviceType
     from app.core.vendor import VendorIdentifier
 
     facts = device.get('facts', {})
@@ -216,7 +314,7 @@ def delete_device():
     """删除设备"""
     data = request.json or {}
     device_id = data.get('id', '')
-    device_name = data.get('name', '')
+    device_name = data.get('name', '') or data.get('remark', '')
 
     if not device_id and not device_name:
         return jsonify({'success': False, 'message': '请指定设备ID或名称'})
@@ -226,7 +324,7 @@ def delete_device():
 
     devices = [
         d for d in devices
-        if d.get('id') != device_id and (d.get('name') != device_name and d.get('remark') != device_name)
+        if d.get('id') != device_id and d.get('remark') != device_name and d.get('ip') != device_name
     ]
 
     if len(devices) == original_len:
@@ -240,14 +338,18 @@ def delete_device():
 def device_collect():
     """采集设备信息"""
     data = request.json or {}
-    device_name = data.get('device', '')
-    collect_type = data.get('type', 'all')
+    device_name = data.get('device', '') or data.get('name', '')
+    device_id = data.get('id', '')
+    collect_type = data.get('type', data.get('collect_type', 'all'))
 
     from netops_tools import NetOpsTools
     tools = NetOpsTools(_devices_file)
     device = None
     for d in tools.load_devices():
-        if d.get('name') == device_name or d.get('remark') == device_name or d.get('ip') == device_name:
+        if device_id and d.get('id') == device_id:
+            device = d
+            break
+        if d.get('remark') == device_name or d.get('ip') == device_name or d.get('name') == device_name:
             device = d
             break
 
@@ -256,7 +358,9 @@ def device_collect():
 
     vendor = device.get('vendor', 'huawei')
     commands = _get_collect_commands(vendor, collect_type)
-    result = tools.execute_tool('run_commands', {'device': device_name, 'commands': commands})
+    # 用设备名/备注/IP传给NetOpsTools
+    dev_identifier = device.get('remark') or device.get('name') or device.get('ip')
+    result = tools.execute_tool('run_commands', {'device': dev_identifier, 'commands': commands})
 
     if result.get('success'):
         # 解析采集结果更新设备信息
@@ -280,6 +384,7 @@ def _get_collect_commands(vendor, collect_type):
             'interface': ['display interface brief'],
             'arp': ['display arp'],
             'route': ['display ip routing-table'],
+            'lldp': ['display lldp neighbor-information list'],
         }
     else:
         cmd_map = {
@@ -313,7 +418,52 @@ def _update_device_facts(device, results, vendor):
                 device['device_type'] = dtype.value
             facts['version_output'] = output[:2000]
 
+        # 提取sysname
+        if 'current-configuration' in cmd or 'running-config' in cmd:
+            import re
+            m = re.search(r'sysname\s+(\S+)', output)
+            if m:
+                device['sysname'] = m.group(1)
+                facts['hostname'] = m.group(1)
+
     device['facts'] = facts
+
+
+@device_bp.route('/api/device/ping', methods=['POST'])
+def device_ping():
+    """检测设备连通性"""
+    data = request.json or {}
+    device_name = data.get('device', '')
+    if not device_name:
+        return jsonify({'success': False, 'message': '请指定设备名', 'online': False})
+
+    devices = _load_devices()
+    dev = None
+    for d in devices:
+        if d.get('remark') == device_name or d.get('ip') == device_name or d.get('name') == device_name:
+            dev = d
+            break
+    if not dev:
+        return jsonify({'success': False, 'message': '设备不存在', 'online': False})
+
+    import socket
+    ip = dev.get('ip', '')
+    port = dev.get('port', 22)
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        result = sock.connect_ex((ip, int(port)))
+        sock.close()
+        online = result == 0
+        # 在线时更新facts时间
+        if online:
+            dev['facts'] = dev.get('facts', {})
+            dev['facts']['last_collected'] = datetime.now().isoformat()
+            _save_devices(devices)
+        return jsonify({'success': True, 'online': online, 'ip': ip, 'port': port})
+    except Exception as e:
+        log.warning(f'Ping {device_name} failed: {e}')
+        return jsonify({'success': False, 'message': str(e), 'online': False})
 
 
 @device_bp.route('/api/device/facts', methods=['GET'])
@@ -325,7 +475,8 @@ def device_facts():
 
     devices = _load_devices()
     for d in devices:
-        if d.get('name') == device_name or d.get('remark') == device_name or d.get('ip') == device_name:
+        if d.get('remark') == device_name or d.get('ip') == device_name or d.get('name') == device_name:
             return jsonify({'success': True, 'facts': d.get('facts', {})})
 
     return jsonify({'success': False, 'message': '设备不存在'})
+

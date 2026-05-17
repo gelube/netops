@@ -5,7 +5,6 @@ Ping 监控模块
 简单的连通性监控，只用 ping
 """
 import asyncio
-import subprocess
 import re
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
@@ -23,7 +22,7 @@ class PingResult:
     packet_loss: float = 0.0
     timestamp: datetime = field(default_factory=datetime.now)
     error: str = ""
-    
+
     def to_dict(self) -> Dict:
         return {
             "host": self.host,
@@ -43,21 +42,21 @@ class DeviceStatus:
     is_online: bool = False
     last_ping: Optional[PingResult] = None
     history: List[PingResult] = field(default_factory=list)
-    
+
     # 统计信息
     avg_latency: float = 0.0
     uptime_percent: float = 0.0
-    
+
     def update(self, result: PingResult):
         """更新状态"""
         self.last_ping = result
         self.is_online = result.success
         self.history.append(result)
-        
+
         # 保留最近 100 次记录
         if len(self.history) > 100:
             self.history = self.history[-100:]
-        
+
         # 计算统计信息
         if self.history:
             successful = [r for r in self.history if r.success]
@@ -67,11 +66,11 @@ class DeviceStatus:
 
 class PingMonitor:
     """Ping 监控器"""
-    
+
     def __init__(self, devices: Dict[str, str] = None, interval: int = 60, count: int = 3, timeout: int = 2):
         """
         初始化
-        
+
         Args:
             devices: 设备字典 {hostname: ip}
             interval: 监控间隔（秒）
@@ -82,28 +81,28 @@ class PingMonitor:
         self.interval = interval
         self.count = count
         self.timeout = timeout
-        
+
         # 设备状态
         self.status: Dict[str, DeviceStatus] = {}
         for hostname, ip in self.devices.items():
             self.status[hostname] = DeviceStatus(hostname=hostname, ip=ip)
-        
+
         # 运行状态
         self._running = False
         self._task = None
-    
+
     def add_device(self, hostname: str, ip: str):
         """添加设备"""
         self.devices[hostname] = ip
         self.status[hostname] = DeviceStatus(hostname=hostname, ip=ip)
-    
+
     def remove_device(self, hostname: str):
         """移除设备"""
         if hostname in self.devices:
             del self.devices[hostname]
         if hostname in self.status:
             del self.status[hostname]
-    
+
     async def ping(self, host: str) -> PingResult:
         """
         执行 ping（自动检测平台，支持 Windows/Linux/macOS）
@@ -148,7 +147,7 @@ class PingMonitor:
             return PingResult(host=host, success=False, error="timeout")
         except Exception as e:
             return PingResult(host=host, success=False, error=str(e))
-    
+
     def _parse_ping_output(self, host: str, output: str) -> PingResult:
         """解析 ping 输出（支持 Windows/Linux/macOS 格式）"""
         # Windows: "Reply from 192.168.1.1: bytes=32 time<1ms TTL=64"
@@ -190,17 +189,17 @@ class PingMonitor:
             latency_ms=latency,
             packet_loss=packet_loss,
         )
-    
+
     async def check_all(self) -> Dict[str, PingResult]:
         """检查所有设备"""
         results = {}
-        
+
         # 并发 ping 所有设备
         tasks = {hostname: self.ping(ip) for hostname, ip in self.devices.items()}
-        
+
         if tasks:
             done = await asyncio.gather(*tasks.values(), return_exceptions=True)
-            
+
             for (hostname, _), result in zip(tasks.items(), done):
                 if isinstance(result, Exception):
                     results[hostname] = PingResult(
@@ -210,25 +209,25 @@ class PingMonitor:
                     )
                 else:
                     results[hostname] = result
-                
+
                 # 更新状态
                 if hostname in self.status:
                     self.status[hostname].update(results[hostname])
-        
+
         return results
-    
+
     async def start(self):
         """启动监控"""
         self._running = True
-        
+
         while self._running:
             await self.check_all()
             await asyncio.sleep(self.interval)
-    
+
     def stop(self):
         """停止监控"""
         self._running = False
-    
+
     def get_status(self, hostname: str = None) -> Dict:
         """获取状态"""
         if hostname:
@@ -243,7 +242,7 @@ class PingMonitor:
                     "last_ping": s.last_ping.to_dict() if s.last_ping else None,
                 }
             return {}
-        
+
         # 返回所有设备状态
         return {
             hostname: {
@@ -255,7 +254,7 @@ class PingMonitor:
             }
             for hostname, s in self.status.items()
         }
-    
+
     def get_offline_devices(self) -> List[Dict]:
         """获取离线设备列表"""
         return [
@@ -267,25 +266,25 @@ class PingMonitor:
             for s in self.status.values()
             if not s.is_online
         ]
-    
+
     def save_status(self, filepath: str):
         """保存状态到文件"""
         data = {
             "timestamp": datetime.now().isoformat(),
             "devices": self.get_status(),
         }
-        
+
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    
+
     def load_devices(self, filepath: str):
         """从文件加载设备列表"""
         if not os.path.exists(filepath):
             return
-        
+
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
-        
+
         for device in data.get("devices", []):
             hostname = device.get("hostname")
             ip = device.get("ip")

@@ -4,7 +4,10 @@
 系统蓝图 - 审计日志、知识库、文件操作、LLM配置
 """
 from flask import Blueprint, request, jsonify
-import json, os, re, time, subprocess, sys
+import json
+import os
+import re
+import subprocess
 
 sys_bp = Blueprint('system', __name__)
 
@@ -30,8 +33,13 @@ def handle_llm_config():
             from app.llm.config import _decrypt_api_key
             if data.get('api_key'):
                 data['api_key'] = _decrypt_api_key(data['api_key'])
+            # 确保 base_url 和 endpoint 都有值（前端用endpoint，LLMConfig用base_url）
+            if data.get('endpoint') and not data.get('base_url'):
+                data['base_url'] = data['endpoint']
+            if data.get('base_url') and not data.get('endpoint'):
+                data['endpoint'] = data['base_url']
             return jsonify(data)
-        return jsonify({'provider': '', 'model': '', 'api_key': '', 'base_url': ''})
+        return jsonify({'provider': '', 'model': '', 'api_key': '', 'base_url': '', 'endpoint': ''})
     else:
         data = request.json or {}
         config_file = os.path.join(_data_dir, 'llm_config.json')
@@ -51,15 +59,16 @@ def test_llm():
     provider = data.get('provider', '')
     api_key = data.get('api_key', '')
     model = data.get('model', '')
-    base_url = data.get('base_url', '')
+    base_url = data.get('base_url', '') or data.get('endpoint', '')
 
-    if not api_key:
-        return jsonify({'success': False, 'message': 'API Key 不能为空'})
+    if not api_key and not base_url:
+        return jsonify({'success': False, 'message': 'API Key 或 Endpoint 不能同时为空'})
 
     try:
         if provider == 'openai':
             import openai
-            client = openai.OpenAI(api_key=api_key, base_url=base_url or None)
+            # 免凭证（Ollama等）：用占位符避免SDK报错
+            client = openai.OpenAI(api_key=api_key or 'sk-no-key-required', base_url=base_url or None)
             resp = client.chat.completions.create(
                 model=model or 'gpt-3.5-turbo',
                 messages=[{'role': 'user', 'content': 'Hi, just testing. Reply with OK.'}],
@@ -72,12 +81,44 @@ def test_llm():
         return jsonify({'success': False, 'message': str(e)})
 
 
+@sys_bp.route('/api/llm/models', methods=['GET', 'POST'])
+def list_llm_models():
+    """获取 LLM 可用模型列表"""
+    data = request.json or {} if request.method == 'POST' else {}
+    if request.method == 'GET':
+        # GET: 从已保存配置读取
+        try:
+            with open(os.path.join(_data_dir, 'llm_config.json'), 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            return jsonify({'success': False, 'message': '未配置LLM', 'models': []})
+    provider = data.get('provider', 'openai')
+    api_key = data.get('api_key', '')
+    base_url = data.get('base_url', '') or data.get('endpoint', '')
+
+    if not base_url:
+        return jsonify({'success': False, 'message': 'Endpoint 不能为空', 'models': []})
+
+    try:
+        if provider in ('openai', 'custom'):
+            import openai
+            client = openai.OpenAI(api_key=api_key or 'sk-no-key-required', base_url=base_url)
+            models = client.models.list()
+            model_ids = sorted([m.id for m in models.data]) if hasattr(models, 'data') else []
+            return jsonify({'success': True, 'models': model_ids})
+        else:
+            return jsonify({'success': False, 'message': f'不支持的 provider: {provider}', 'models': []})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e), 'models': []})
+
+
 @sys_bp.route('/api/audit/logs', methods=['GET'])
 def get_audit_logs():
     from app.audit import AuditLogger
     logger = AuditLogger()
     limit = int(request.args.get('limit', 50))
-    logs = logger.get_recent(limit=limit)
+    entries = logger.query(limit=limit)
+    logs = [e.to_dict() for e in entries]
     return jsonify({'success': True, 'logs': logs})
 
 

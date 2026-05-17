@@ -63,35 +63,35 @@ class StructuredLogger(logging.Logger):
         """带结构化字段的日志"""
         super().log(level, msg, extra={"struct_data": kwargs})
 
-    def info(self, msg, **kwargs):
+    def info(self, msg, *args, **kwargs):
         if kwargs:
             self._log_struct(logging.INFO, msg, **kwargs)
         else:
-            super().info(msg)
+            super().info(msg, *args)
 
-    def warning(self, msg, **kwargs):
+    def warning(self, msg, *args, **kwargs):
         if kwargs:
             self._log_struct(logging.WARNING, msg, **kwargs)
         else:
-            super().warning(msg)
+            super().warning(msg, *args)
 
-    def error(self, msg, **kwargs):
+    def error(self, msg, *args, **kwargs):
         if kwargs:
             self._log_struct(logging.ERROR, msg, **kwargs)
         else:
-            super().error(msg)
+            super().error(msg, *args)
 
-    def debug(self, msg, **kwargs):
+    def debug(self, msg, *args, **kwargs):
         if kwargs:
             self._log_struct(logging.DEBUG, msg, **kwargs)
         else:
-            super().debug(msg)
+            super().debug(msg, *args)
 
-    def critical(self, msg, **kwargs):
+    def critical(self, msg, *args, **kwargs):
         if kwargs:
             self._log_struct(logging.CRITICAL, msg, **kwargs)
         else:
-            super().critical(msg)
+            super().critical(msg, *args)
 
 
 # 注册自定义 Logger 类

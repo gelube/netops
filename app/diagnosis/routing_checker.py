@@ -4,63 +4,67 @@
 路由诊断检查器
 """
 import re
-from typing import Dict, Any, Optional, List
+from typing import Optional
 from app.diagnosis.base import BaseChecker, DiagnosisResult, CheckStatus
+
+from app.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class RoutingChecker(BaseChecker):
     """路由故障诊断"""
-    
+
     def __init__(self, ssh_connection=None, llm_client=None):
         super().__init__(ssh_connection)
         self.llm = llm_client
-    
-    def diagnose(self, source_ip: str = "", dest_ip: str = "", 
+
+    def diagnose(self, source_ip: str = "", dest_ip: str = "",
                       symptom: str = "", **kwargs) -> DiagnosisResult:
         """
         执行路由诊断
-        
+
         Args:
             source_ip: 源IP
             dest_ip: 目标IP
             symptom: 故障现象
         """
         self.results = []
-        
+
         if not self.conn:
             return DiagnosisResult(
                 success=False,
                 root_cause="SSH连接未建立"
             )
-        
+
         # 步骤1: 检查路由表
-        routing_table = self._check_routing_table(dest_ip)
-        
+        self._check_routing_table(dest_ip)
+
         # 步骤2: 检查动态路由协议
-        dynamic_routing = self._check_dynamic_routing()
-        
+        self._check_dynamic_routing()
+
         # 步骤3: 检查默认路由
-        default_route = self._check_default_route()
-        
+        self._check_default_route()
+
         # 步骤4: 执行traceroute测试
-        traceroute_result = self._check_traceroute(dest_ip) if dest_ip else None
-        
+        self._check_traceroute(dest_ip) if dest_ip else None
+
         # 步骤5: LLM分析
         if self.llm:
             analysis = self._llm_analysis(source_ip, dest_ip, symptom)
         else:
             analysis = None
-        
+
         # 生成结果
         root_cause, suggestions = self._generate_result(analysis)
-        
+
         return DiagnosisResult(
             success=all(r.status == CheckStatus.PASS for r in self.results),
             root_cause=root_cause,
             suggestions=suggestions,
             steps=self.results
         )
-    
+
     def _check_routing_table(self, dest_ip: str) -> bool:
         """检查路由表"""
         try:
@@ -69,7 +73,7 @@ class RoutingChecker(BaseChecker):
                 output = self.execute_command("display ip routing-table")
             else:
                 output = self.execute_command("show ip route")
-            
+
             # 检查是否有目标路由
             if dest_ip and dest_ip in output:
                 self.add_result(
@@ -103,7 +107,7 @@ class RoutingChecker(BaseChecker):
                     message="路由表检查完成"
                 )
                 return True
-        
+
         except Exception as e:
             self.add_result(
                 step="检查路由表",
@@ -111,18 +115,18 @@ class RoutingChecker(BaseChecker):
                 message=f"检查失败: {str(e)}"
             )
             return False
-    
+
     def _check_dynamic_routing(self) -> bool:
         """检查动态路由协议"""
         try:
             results = []
-            
+
             # 检查OSPF
             if self._is_huawei():
                 ospf_output = self.execute_command("display ospf peer")
             else:
                 ospf_output = self.execute_command("show ip ospf neighbor")
-            
+
             if "Full" in ospf_output or "DR" in ospf_output:
                 self.add_result(
                     step="检查OSPF",
@@ -145,13 +149,13 @@ class RoutingChecker(BaseChecker):
                     suggestion="检查OSPF配置和邻居状态"
                 )
                 results.append(False)
-            
+
             # 检查BGP
             if self._is_huawei():
                 bgp_output = self.execute_command("display bgp peer")
             else:
                 bgp_output = self.execute_command("show ip bgp summary")
-            
+
             if "Established" in bgp_output:
                 self.add_result(
                     step="检查BGP",
@@ -174,9 +178,9 @@ class RoutingChecker(BaseChecker):
                     suggestion="检查BGP配置和邻居状态"
                 )
                 results.append(False)
-            
+
             return all(results)
-        
+
         except Exception as e:
             self.add_result(
                 step="检查动态路由",
@@ -184,7 +188,7 @@ class RoutingChecker(BaseChecker):
                 message=f"跳过动态路由检查: {str(e)}"
             )
             return True
-    
+
     def _check_default_route(self) -> bool:
         """检查默认路由"""
         try:
@@ -192,7 +196,7 @@ class RoutingChecker(BaseChecker):
                 output = self.execute_command("display ip routing-table | include 0.0.0.0")
             else:
                 output = self.execute_command("show ip route 0.0.0.0")
-            
+
             if "0.0.0.0" in output:
                 self.add_result(
                     step="检查默认路由",
@@ -208,7 +212,7 @@ class RoutingChecker(BaseChecker):
                     suggestion="配置默认路由: ip route 0.0.0.0 0.0.0.0 <next-hop>"
                 )
                 return False
-        
+
         except Exception as e:
             self.add_result(
                 step="检查默认路由",
@@ -216,7 +220,7 @@ class RoutingChecker(BaseChecker):
                 message=f"跳过默认路由检查: {str(e)}"
             )
             return True
-    
+
     def _check_traceroute(self, dest_ip: str) -> bool:
         """执行traceroute测试"""
         try:
@@ -224,7 +228,7 @@ class RoutingChecker(BaseChecker):
                 output = self.execute_command(f"tracert {dest_ip}", timeout=60)
             else:
                 output = self.execute_command(f"traceroute {dest_ip}", timeout=60)
-            
+
             # 分析traceroute结果
             if "* *" in output or "timeout" in output.lower():
                 # 找到中断点
@@ -233,7 +237,7 @@ class RoutingChecker(BaseChecker):
                 for line in lines:
                     if re.search(r'\d+\s+\d+\.\d+\.\d+\.\d+', line):
                         last_hop = line
-                
+
                 self.add_result(
                     step="Traceroute测试",
                     status=CheckStatus.FAIL,
@@ -249,7 +253,7 @@ class RoutingChecker(BaseChecker):
                     message=f"到 {dest_ip} 的路径正常"
                 )
                 return True
-        
+
         except Exception as e:
             self.add_result(
                 step="Traceroute测试",
@@ -257,7 +261,7 @@ class RoutingChecker(BaseChecker):
                 message=f"跳过Traceroute: {str(e)}"
             )
             return True
-    
+
     def _llm_analysis(self, source_ip: str, dest_ip: str, symptom: str) -> Optional[str]:
         """LLM分析"""
         try:
@@ -273,24 +277,24 @@ class RoutingChecker(BaseChecker):
                 context,
                 "路由故障的根因是什么？如何修复？"
             )
-        except:
+        except Exception:
             return None
-    
+
     def _generate_result(self, llm_analysis: str) -> tuple:
         """生成诊断结果"""
         failed = [r for r in self.results if r.status == CheckStatus.FAIL]
-        
+
         if not failed:
             return None, ["路由配置正常"]
-        
+
         root_cause = failed[0].message
         suggestions = [r.suggestion for r in failed if r.suggestion]
-        
+
         if llm_analysis:
             suggestions.append(f"\n智能分析:\n{llm_analysis}")
-        
+
         return root_cause, suggestions
-    
+
     def _is_huawei(self) -> bool:
         if not self.conn:
             return True

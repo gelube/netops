@@ -9,9 +9,13 @@
 3. 自动备份+回滚机制
 """
 import re
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List
 from dataclasses import dataclass, field
 from enum import Enum
+
+from app.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class RiskLevel(Enum):
@@ -58,9 +62,14 @@ class CommandGuard:
         r'\b(erase|delete)\s+(flash|nvram|startup-config|running-config)\b',
         r'\b(format)\s+(flash|slot)\b',
         r'\b(factory-reset)\b',
-        r'\b(reset)\s+(saved-configuration)\b',
+        r'\b(reset)\s+(saved-configuration|current-configuration)\b',
         r'\b(write\s+erase|write\s+erase\b)',
         r'\b(delete)\s+(vlan\.dat)\b',
+        r'\b(clear)\s+(startup-config|running-config|current-configuration)\b',
+        r'\b(reset)\s+(stack|cluster)\b',
+        r'\b(undo)\s+(startup-configuration|current-configuration)\b',
+        r'\b(erase)\s+(configuration)\b',
+        r'\b(startup\s+config)\s*(=|:)\s*$\b',
     ]
 
     # 高风险命令 → 允许但需额外确认
@@ -79,6 +88,10 @@ class CommandGuard:
         r'\bswitchport\s+mode\s+trunk\b',      # 同上
         r'\bacl\s+\d+\s+rule\s+permit\s+ip\s+any\s+any\b',  # 全放行ACL
         r'\baccess-list\s+\d+\s+permit\s+ip\s+any\s+any\b', # 同上
+        r'\bclear\s+(arp|mac|ip\s+route|ospf|bgp)\b',   # 清除表项
+        r'\breset\s+(ospf|bgp|stp|lldp)\b',    # 重置协议
+        r'\bundo\s+(ospf|bgp|isis)\s+\d*\b',  # 删除路由协议
+        r'\bno\s+(router\s+ospf|router\s+bgp)\b',  # 同上
     ]
 
     # 中风险命令 → 需要备份
@@ -310,8 +323,8 @@ class CommandGuard:
         return "\n".join(lines)
 
 
-class ConfigBackup:
-    """配置备份与回滚管理器"""
+class ConfigBackupHelper:
+    """配置备份与回滚辅助器（配置diff和回滚命令生成）"""
 
     def __init__(self, ssh_connection, vendor: str = ""):
         self.conn = ssh_connection
@@ -331,7 +344,7 @@ class ConfigBackup:
             self.backup_config = "\n".join(outputs)
             return bool(self.backup_config.strip())
         except Exception as e:
-            print(f"备份配置失败: {e}")
+            log.error("备份配置失败", error=str(e))
             return False
 
     def get_rollback_commands(self) -> List[str]:

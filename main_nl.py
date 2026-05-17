@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.llm.config import LLMConfig, LLMClient
 from app.nl_router.executor import NLExecutor
-from app.credentials import get_credential_manager, DeviceCredential
+from app.credentials import get_credential_manager
 from version import __version__
 
 
@@ -36,7 +36,7 @@ def main():
 输入 'quit' 退出
 
 """)
-    
+
     # 初始化 LLM 客户端 — 优先从环境变量读取配置
     import os as _os
     llm_config = LLMConfig(
@@ -45,27 +45,27 @@ def main():
         api_key=_os.environ.get("NETOPS_LLM_API_KEY", "ollama"),
         model=_os.environ.get("NETOPS_LLM_MODEL", "qwen2.5:7b"),
     )
-    
+
     llm_client = LLMClient(llm_config)
-    
+
     # 初始化凭证管理器
     cred_manager = get_credential_manager()
-    
+
     # 初始化执行器（纯 SSH 模式）
     executor = NLExecutor(llm_client=llm_client, credential_manager=cred_manager)
-    
+
     # 交互式命令行
     while True:
         try:
             user_input = input("\n🔹 NetOps> ").strip()
-            
+
             if not user_input:
                 continue
-            
+
             if user_input.lower() in ["quit", "exit", "q"]:
                 print("👋 再见")
                 break
-            
+
             # 特殊命令：保存凭证
             if user_input.startswith("!save "):
                 # !save hostname ip username password
@@ -73,7 +73,7 @@ def main():
                 if len(parts) >= 4:
                     hostname, ip, username, password = parts[:4]
                     port = int(parts[4]) if len(parts) > 4 else 22
-                    
+
                     from app.credentials import save_device_credential
                     if save_device_credential(hostname, ip, username, password, port=port):
                         print(f"✅ 已保存 {hostname} 的凭证")
@@ -82,7 +82,7 @@ def main():
                 else:
                     print("用法：!save hostname ip username password [port]")
                 continue
-            
+
             # 特殊命令：列出凭证
             if user_input == "!list":
                 hostnames = cred_manager.list_hostnames()
@@ -93,16 +93,16 @@ def main():
                 else:
                     print("未保存任何设备")
                 continue
-            
+
             # 执行自然语言请求
             result = executor.execute(user_input)
-            
+
             # 输出结果
             if result.success:
                 if result.requires_confirmation:
                     print("\n⚠️  待确认配置:")
                     print(result.confirmation_details)
-                    
+
                     confirm = input("\n是否执行？(y/n): ").strip().lower()
                     if confirm in ["y", "yes"]:
                         # 需要凭证
@@ -113,10 +113,10 @@ def main():
                         else:
                             device_ip = result.data.get("device_ip", "")
                             device = result.data.get("device", "")
-                            
+
                             # 尝试从凭证管理器获取
                             cred = cred_manager.get_credential(device) if device else None
-                            
+
                             if cred:
                                 # 已有凭证，直接执行
                                 exec_result = executor.confirm_and_execute(
@@ -130,21 +130,21 @@ def main():
                                 print(f"\n需要 {device} ({device_ip}) 的 SSH 凭证:")
                                 username = input("用户名：").strip()
                                 password = input("密码：").strip()
-                                
+
                                 save = input("是否保存凭证？(y/n): ").strip().lower()
-                                
+
                                 exec_result = executor.confirm_and_execute(
                                     confirmed=True,
                                     device_data=result.data,
                                     username=username,
                                     password=password,
                                 )
-                                
+
                                 if save == "y" and device:
                                     from app.credentials import save_device_credential
                                     if save_device_credential(device, device_ip, username, password):
                                         print("✅ 凭证已保存")
-                            
+
                             print(f"\n{exec_result.message}")
                     else:
                         print("❌ 已取消")
@@ -157,7 +157,7 @@ def main():
                             for step in result.data.get("steps", []):
                                 status_icon = "✅" if step.get("status") == "PASS" else "❌"
                                 print(f"  {status_icon} {step.get('step')}: {step.get('message')}")
-                            
+
                             if result.data.get("root_cause"):
                                 print(f"\n根因：{result.data['root_cause']}")
                             if result.data.get("suggestions"):
@@ -168,7 +168,7 @@ def main():
                             print(result.data)
             else:
                 print(f"\n❌ {result.message}")
-        
+
         except KeyboardInterrupt:
             print("\n👋 再见")
             break

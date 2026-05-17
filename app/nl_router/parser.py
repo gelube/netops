@@ -8,9 +8,13 @@ from pydantic import BaseModel
 import json
 
 from app.llm.config import LLMClient
-from app.nl_router.intent_types import requires_ssh, is_diagnosis
+from app.nl_router.intent_types import requires_ssh
 from app.nl_router.language_map import get_language_mapper
 from app.network.command_templates import TemplateMatcher
+
+from app.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class ParsedIntent(BaseModel):
@@ -19,11 +23,11 @@ class ParsedIntent(BaseModel):
     confidence: float = 1.0
     parameters: Dict[str, Any] = {}
     raw_input: str = ""
-    
+
     # 本地执行信息
     requires_ssh: bool = False
     ssh_commands: List[str] = []
-    
+
     # 设备定位
     device_hostname: Optional[str] = None
     device_ip: Optional[str] = None
@@ -219,77 +223,77 @@ Parameters: {{"type": "static", "dest": "10.0.0.0", "mask": "255.255.255.0", "ne
 
 Vendor: huawei
 Intent: config_acl
-Parameters: {{"action": "block", "target_ip": "192.168.100.10"}}
+Parameters: {{"action": "block", "target_ip": "192.168.100.10", "acl_number": 3000}}
 输出：["system-view", "acl number 3000", "rule deny ip source 192.168.100.10 0", "quit"]
 
 Vendor: cisco
 Intent: config_acl
-Parameters: {{"action": "block", "target_ip": "192.168.100.20"}}
-输出：["enable", "configure terminal", "access-list 100 deny ip host 192.168.100.20 any", "access-list 100 permit ip any any", "end"]
+Parameters: {{"action": "block", "target_ip": "192.168.100.20", "acl_name": "NETOPS_BLOCK"}}
+输出：["enable", "configure terminal", "ip access-list extended NETOPS_BLOCK", "deny ip host 192.168.100.20 any", "permit ip any any", "end"]
 """
 
 
 class IntentParser:
     """意图解析器"""
-    
+
     def __init__(self, llm_client: LLMClient):
         self.llm = llm_client
         # 导入通俗语言映射器
         self.language_mapper = get_language_mapper()
-    
+
     def parse(self, user_input: str, context: str = "") -> ParsedIntent:
         """
         解析用户输入（支持通俗语言）
-        
+
         Args:
             user_input: 用户自然语言输入
             context: 会话上下文（如之前的设备、VLAN等）
-        
+
         Returns:
             ParsedIntent
         """
         # 第零步：通俗语言解析（提取部门、位置、接口等）
         lang_parse = self.language_mapper.parse_user_input(user_input)
-        
+
         # 第一步：意图分类（附带上文）
         intent = self._classify_intent(user_input, context=context)
         intent.raw_input = user_input
-        
+
         # 第二步：合并通俗语言解析结果
         if lang_parse["parameters"]:
             # 合并参数（用户明确指定的优先）
             for key, value in lang_parse["parameters"].items():
                 if key not in intent.parameters or not intent.parameters[key]:
                     intent.parameters[key] = value
-        
+
         # 提取的信息存入 parameters
         if lang_parse.get("extracted_info"):
             for key, value in lang_parse["extracted_info"].items():
                 if key not in intent.parameters:
                     intent.parameters[key] = value
-        
+
         # 第三步：标记 SSH 执行
         if requires_ssh(intent.intent_type):
             intent.requires_ssh = True
-        
+
         return intent
-    
+
     def _classify_intent(self, user_input: str, context: str = "") -> ParsedIntent:
         """使用 LLM 分类意图"""
         prompt = INTENT_CLASSIFICATION_PROMPT.format(user_input=user_input)
-        
+
         # 如果有上下文，附加到 prompt 中
         if context:
             prompt += f"\n\n## 上下文\n{context}"
-        
+
         try:
             response = self.llm.chat(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1  # 低温度保证输出稳定
             )
-            
+
             content = response.get("content", "")
-            
+
             # 解析 JSON 输出
             # 清理可能的 markdown 标记
             content = content.strip()
@@ -298,9 +302,9 @@ class IntentParser:
             if content.endswith("```"):
                 content = content[:-3]
             content = content.strip()
-            
+
             data = json.loads(content)
-            
+
             return ParsedIntent(
                 intent_type=data.get("intent_type", ""),
                 confidence=data.get("confidence", 1.0),
@@ -308,7 +312,7 @@ class IntentParser:
                 device_hostname=data.get("device_hostname"),
                 device_ip=data.get("device_ip"),
             )
-        
+
         except Exception as e:
             # 降级：返回基础意图
             return ParsedIntent(
@@ -317,21 +321,21 @@ class IntentParser:
                 parameters={"fallback_reason": str(e)},
                 raw_input=user_input,
             )
-    
+
     def generate_config_commands(
-        self, 
-        intent: ParsedIntent, 
+        self,
+        intent: ParsedIntent,
         vendor: str,
         device_hostname: str
     ) -> List[str]:
         """
         生成配置命令 — 模板优先，LLM兜底
-        
+
         Args:
             intent: 解析后的意图
             vendor: 设备厂商 (huawei/cisco/h3c/juniper)
             device_hostname: 设备名
-        
+
         Returns:
             配置命令列表
         """
@@ -341,25 +345,25 @@ class IntentParser:
             vendor=vendor,
             parameters=intent.parameters
         )
-        
+
         if template_commands:
             return template_commands
-        
+
         # 2. 模板未匹配，走LLM生成
         prompt = CONFIG_COMMAND_PROMPT.format(
             vendor=vendor,
             intent_type=intent.intent_type,
             parameters=intent.parameters
         )
-        
+
         try:
             response = self.llm.chat(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1
             )
-            
+
             content = response.get("content", "")
-            
+
             # 清理 markdown
             content = content.strip()
             if content.startswith("```json"):
@@ -367,11 +371,11 @@ class IntentParser:
             if content.endswith("```"):
                 content = content[:-3]
             content = content.strip()
-            
+
             commands = json.loads(content)
             return commands
-        
+
         except Exception as e:
             # 降级：返回空命令列表
-            print(f"生成配置命令失败：{e}")
+            log.error("生成配置命令失败", error=str(e))
             return []

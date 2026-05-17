@@ -4,7 +4,10 @@
 聊天蓝图 - AI对话、快速配置、诊断
 """
 from flask import Blueprint, request, jsonify
-import json, os, re, time
+import json
+import os
+import re
+import time
 
 chat_bp = Blueprint('chat', __name__)
 
@@ -52,26 +55,192 @@ def chat():
     message = data.get('message', '').strip()
     device_name = data.get('device', '')
     session_id = data.get('session_id', 'default')
+    preview_only = data.get('preview_only', False)
+    confirmed_commands = data.get('confirmed_commands')
+    context = data.get('context', {})
+    selected_device = context.get('selected_device', '') or device_name
 
-    if not message:
+    if not message and not confirmed_commands:
         return jsonify({'success': False, 'message': '消息不能为空'})
 
     try:
-        result = _do_chat(message, device_name, session_id)
+        # 确认执行模式：直接执行已确认的命令
+        if confirmed_commands:
+            result = _do_exec_confirmed(confirmed_commands, session_id)
+            return jsonify(result)
+
+        result = _do_chat(message, selected_device, session_id, preview_only=preview_only)
+        # 兼容前端：response = message
+        if 'message' in result and 'response' not in result:
+            result['response'] = result['message']
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e), 'response': str(e)})
+
+
+@chat_bp.route('/api/chat/clear', methods=['POST'])
+def chat_clear():
+    """清除聊天会话"""
+    data = request.json or {}
+    session_id = data.get('session_id', 'default')
+    try:
+        from app.session import SessionManager
+        session_dir = os.path.join(_data_dir, 'sessions')
+        session_mgr = SessionManager(storage_dir=session_dir)
+        session_mgr.delete_session(session_id)
+        return jsonify({'success': True, 'message': '会话已清除'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
 
-def _do_chat(message, selected_device, session_id='default'):
+def _do_exec_confirmed(confirmed_commands, session_id='default'):
+    """执行已确认的命令（用户确认后调用）"""
+    from app.network.command_service import CommandService
+    from app.session import SessionManager
+    from app.session.models import TurnRole
+
+    cmd_svc = CommandService()
+    session_dir = os.path.join(_data_dir, 'sessions')
+    session_mgr = SessionManager(storage_dir=session_dir)
+    devices = _load_devices()
+    all_results = []
+
+    for item in confirmed_commands:
+        dev_name = item.get('device', '')
+        commands = item.get('commands', [])
+        if not commands:
+            continue
+
+        # 查找设备
+        dev = None
+        for d in devices:
+            if d.get('name') == dev_name or d.get('remark') == dev_name or d.get('ip') == dev_name:
+                dev = d
+                break
+
+        if not dev:
+            all_results.append({'device': dev_name, 'error': f'设备 {dev_name} 不存在', 'success': False})
+            continue
+
+        dev_info = CommandService.device_from_dict(dev)
+        cmd_result = cmd_svc.execute(dev_info, commands, user_id=session_id, source='confirmed')
+
+        if cmd_result.success:
+            outputs = []
+            for o in cmd_result.outputs:
+                outputs.append(f"命令: {o.get('command', '')}\n{o.get('output', '')[:500]}")
+            all_results.append({
+                'device': dev_name,
+                'success': True,
+                'results': outputs,
+                'backup_id': cmd_result.backup_id,
+            })
+        else:
+            all_results.append({
+                'device': dev_name,
+                'success': False,
+                'error': cmd_result.error,
+                'blocked': [c.command for c in (cmd_result.blocked_commands or [])],
+            })
+
+    # 记录会话
+    summary_parts = []
+    for r in all_results:
+        if r.get('success'):
+            summary_parts.append(f"✅ {r['device']}: {len(r.get('results', []))} 条命令执行成功")
+        else:
+            summary_parts.append(f"❌ {r['device']}: {r.get('error', '执行失败')}")
+    summary = '\n'.join(summary_parts)
+    session_mgr.add_turn(session_id, TurnRole.ASSISTANT, f"已确认执行:\n{summary}")
+
+    return {
+        'success': all(r.get('success') for r in all_results) if all_results else False,
+        'message': summary,
+        'response': summary,
+        'executed': True,
+        'results': all_results,
+    }
+
+def _extract_commands_from_text(text, selected_device='', user_message=''):
+    """从LLM文本回复中提取命令（fallback for models without function calling）"""
+    # 只有用户明确请求执行操作时才提取
+    EXEC_KEYWORDS = ['配置', '创建', '设置', '添加', '删除', '修改', '关闭', '开启',
+                     '执行', '下发', '应用', '部署', '开通', '关闭', 'shutdown',
+                     'undo', '撤销', '取消', 'no ']
+    is_exec_intent = any(k in user_message for k in EXEC_KEYWORDS)
+    if not is_exec_intent:
+        return []
+
+    planned = []
+    # 提取 ```bash 或 ``` 代码块中的命令
+    blocks = re.findall(r'```(?:bash|shell|sh)?\s*\n(.*?)```', text, re.DOTALL)
+    if not blocks:
+        return planned
+
+    # 网络设备命令关键词（华为/H3C/Cisco/Juniper）
+    CMD_PREFIXES = (
+        'display ', 'show ', 'system-view', 'configure', 'interface ',
+        'vlan ', 'ip ', 'port ', 'undo ', 'no ', 'delete ',
+        'ping ', 'traceroute', 'telnet ', 'ssh ',
+        'ospf ', 'bgp ', 'isis ', 'mpls ',
+        'acl ', 'firewall ', 'nat ',
+        'snmp ', 'ntp ', 'syslog ',
+        'stp ', 'lacp ', 'ethernet ',
+        'router ', 'switchport ',
+        'commit', 'rollback', 'save', 'quit', 'return',
+        'set ', 'edit ', 'top ',
+    )
+
+    commands = []
+    for block in blocks:
+        for line in block.strip().split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            # 跳过中文行
+            if re.search(r'[\u4e00-\u9fff]', line):
+                continue
+            # 只保留以网络命令前缀开头的行
+            if any(line.lower().startswith(p) for p in CMD_PREFIXES):
+                commands.append(line)
+
+    if commands:
+        planned.append({
+            'device': selected_device or '',
+            'commands': commands,
+        })
+
+    return planned
+
+
+def _do_chat(message, selected_device, session_id='default', preview_only=False):
     """核心聊天逻辑"""
-    from app.llm.config import LLMConfig
+    from app.llm.config import LLMConfig, LLMClient, LLMConfigManager, _decrypt_api_key
     from app.session import SessionManager
     from app.session.models import TurnRole
     from netops_tools import NetOpsTools, get_tools_definition
 
-    config = LLMConfig()
-    llm = config.get_client()
+    # 从 web/data/llm_config.json 加载配置（前端保存到此路径）
+    llm_config_file = os.path.join(_data_dir, 'llm_config.json')
+    if os.path.exists(llm_config_file):
+        try:
+            with open(llm_config_file, 'r', encoding='utf-8') as f:
+                cfg_data = json.load(f)
+            config = LLMConfig(
+                provider=cfg_data.get('provider', 'openai'),
+                endpoint=cfg_data.get('endpoint', '') or cfg_data.get('base_url', ''),
+                api_key=_decrypt_api_key(cfg_data.get('api_key', '')),
+                model=cfg_data.get('model', ''),
+            )
+            llm = LLMClient(config)
+        except Exception as e:
+            log_msg = f'加载LLM配置失败: {e}'
+            return {'success': False, 'message': log_msg}
+    else:
+        # 回退到 LLMConfigManager（读 config/llm_config.json）
+        config = LLMConfigManager()
+        llm = config.get_client()
+
     if not llm:
         return {'success': False, 'message': 'LLM 未配置，请先在设置中配置'}
 
@@ -80,12 +249,9 @@ def _do_chat(message, selected_device, session_id='default'):
     session_mgr = SessionManager(storage_dir=session_dir)
 
     # 加载会话历史
-    # 注意：Web端用 session_id 作为 user_id，每个浏览器tab一个会话
-    # SessionManager 的 user_id 参数在这里传的是 session_id
     session = session_mgr.get_session(session_id)
     if not session:
         session = session_mgr.create_session(session_id)
-    # 使用 SessionManager.add_turn 来添加轮次（会自动保存）
     session_mgr.add_turn(session_id, TurnRole.USER, message)
 
     # 构建系统提示（使用缓存的设备列表字符串）
@@ -118,22 +284,30 @@ def _do_chat(message, selected_device, session_id='default'):
     response = llm.chat(messages=messages, tools=get_tools_definition())
 
     # 处理工具调用
-    if response.get('tool_calls'):
+    if isinstance(response.get('tool_calls'), list) and response.get('tool_calls'):
         from app.network.command_service import CommandService
         cmd_svc = CommandService()
+        planned_commands = []
         results = []
+
         for tc in response['tool_calls']:
             tool_name = tc.get('function', {}).get('name', '')
             arguments = json.loads(tc.get('function', {}).get('arguments', '{}'))
 
-            # 命令类工具 → 统一走 CommandService
+            # 命令类工具
             if tool_name in ('run_commands', 'ssh_connect'):
                 commands = arguments.get('commands', [])
+                dev_name = arguments.get('device', '')
                 if commands:
+                    # 预览模式：只收集命令不执行
+                    if preview_only:
+                        planned_commands.append({'device': dev_name, 'commands': commands})
+                        continue
+
                     # 查找设备
                     dev = None
                     for d in devices:
-                        if d.get('name') == arguments.get('device') or d.get('remark') == arguments.get('device'):
+                        if d.get('name') == dev_name or d.get('remark') == dev_name or d.get('ip') == dev_name:
                             dev = d
                             break
                     if dev:
@@ -146,7 +320,6 @@ def _do_chat(message, selected_device, session_id='default'):
                                 'blocked': bool(cmd_result.blocked_commands),
                             })
                             continue
-                        # 转换 CommandService 结果为原格式
                         tool_result = {
                             'success': True,
                             'results': cmd_result.outputs,
@@ -155,9 +328,32 @@ def _do_chat(message, selected_device, session_id='default'):
                         results.append({'tool': tool_name, 'result': tool_result})
                         continue
 
-            # 非命令类工具（如 get_devices）仍走 NetOpsTools
+            # 非命令类工具（如 get_devices）— 预览模式也执行（只读）
             tool_result = tools.execute_tool(tool_name, arguments)
             results.append({'tool': tool_name, 'result': tool_result})
+
+        # 预览模式：返回命令列表供确认
+        if preview_only and planned_commands:
+            session_mgr.add_turn(session_id, TurnRole.ASSISTANT,
+                f"预览命令: {json.dumps(planned_commands, ensure_ascii=False)}")
+            return {
+                'success': True,
+                'preview': True,
+                'planned_commands': planned_commands,
+                'message': '命令预览已生成，请确认后执行',
+                'response': '命令预览已生成，请确认后执行',
+            }
+
+        # 非预览模式且有计划命令但没执行（preview_only没生效的情况）
+        if preview_only and not planned_commands:
+            # LLM没生成命令工具调用，直接返回文本
+            content = response.get('content', '')
+            session_mgr.add_turn(session_id, TurnRole.ASSISTANT, content)
+            return {
+                'success': True,
+                'message': content,
+                'response': content,
+            }
 
         # 把工具结果反馈给LLM
         tool_summary = '\n'.join([
@@ -169,16 +365,41 @@ def _do_chat(message, selected_device, session_id='default'):
         return {
             'success': True,
             'message': tool_summary,
+            'response': tool_summary,
+            'executed': True,
             'tool_calls': results,
         }
 
-    # 普通回复
+    # 普通回复 — 尝试从文本中提取命令（fallback for models without function calling）
     content = response.get('content', '')
+    extracted = _extract_commands_from_text(content, selected_device, message)
+
+    if extracted:
+        session_mgr.add_turn(session_id, TurnRole.ASSISTANT, content)
+        if preview_only:
+            return {
+                'success': True,
+                'preview': True,
+                'planned_commands': extracted,
+                'message': content,
+                'response': content,
+            }
+        else:
+            # 非preview模式也只预览，等用户确认
+            return {
+                'success': True,
+                'preview': True,
+                'planned_commands': extracted,
+                'message': content,
+                'response': content,
+            }
+
     session_mgr.add_turn(session_id, TurnRole.ASSISTANT, content)
 
     return {
         'success': True,
         'message': content,
+        'response': content,
     }
 
 
@@ -237,8 +458,8 @@ def quick_config():
         })
 
     # 2. LLM兜底
-    from app.llm.config import LLMConfig
-    llm = LLMConfig().get_client()
+    from app.llm.config import LLMConfigManager
+    llm = LLMConfigManager().get_client()
     if not llm:
         return jsonify({'success': False, 'message': 'LLM未配置'})
 
@@ -360,7 +581,7 @@ def _analyze_diagnosis(results, diagnose_type):
             if not output.strip() or len(output.strip()) < 20:
                 analysis['findings'].append('⚠️ ARP表为空')
             else:
-                lines = [l for l in output.split('\n') if l.strip() and not l.strip().startswith(('Age', 'IP', '-'))]
+                lines = [link for link in output.split('\n') if link.strip() and not link.strip().startswith(('Age', 'IP', '-'))]
                 analysis['findings'].append(f'ARP表有 {len(lines)} 条记录')
 
         elif 'route' in cmd:
@@ -414,7 +635,7 @@ def config_diff():
     from app.diagnosis.config_diff import ConfigDiff
 
     data = request.json or {}
-    device_ip = data.get('device_ip', '')
+    data.get('device_ip', '')
     old_config = data.get('old_config', '')
     new_config = data.get('new_config', '')
     old_file = data.get('old_file', '')
@@ -451,9 +672,38 @@ def config_snapshot():
     from app.diagnosis.config_diff import ConfigDiff
 
     data = request.json or {}
+    device_name = data.get('device', '')
     device_ip = data.get('device_ip', '')
     config = data.get('config', '')
     label = data.get('label', 'manual')
+
+    # 如果没传config，自动采集
+    if not config and (device_name or device_ip):
+        from netops_tools import NetOpsTools
+        tools = NetOpsTools(_devices_file)
+        devices = tools.load_devices()
+        device = None
+        for d in devices:
+            if d.get('id') == device_name or d.get('remark') == device_name or d.get('ip') == device_ip or d.get('ip') == device_name:
+                device = d
+                break
+        if not device:
+            return jsonify({'success': False, 'message': f'设备 {device_name or device_ip} 不存在'})
+        dev_id = device.get('remark') or device.get('name') or device.get('ip')
+        vendor = device.get('vendor', 'huawei')
+        # 选择配置命令
+        if vendor in ('huawei', 'h3c'):
+            cmd = 'display current-configuration'
+        elif vendor == 'cisco':
+            cmd = 'show running-config'
+        else:
+            cmd = 'show running-config'
+        result = tools.execute_tool('run_commands', {'device': dev_id, 'commands': [cmd]})
+        if result.get('success') and result.get('results'):
+            config = result['results'][0].get('output', '')
+            device_ip = device.get('ip', device_ip)
+        else:
+            return jsonify({'success': False, 'message': f'采集配置失败: {result.get("message", "未知错误")}'})
 
     if not device_ip or not config:
         return jsonify({'success': False, 'message': '缺少 device_ip 或 config'})

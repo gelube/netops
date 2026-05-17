@@ -1,8 +1,10 @@
 import os
 import json
-import re
 import sys
 import time
+import logging
+
+log = logging.getLogger(__name__)
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.join(_DIR, 'data')
@@ -52,7 +54,8 @@ class NetOpsTools:
             conn.write_channel('\n')
             time.sleep(1)
             conn.read_channel()
-        except Exception:
+        except Exception as e:
+            log.debug("跳过启动提示失败", error=str(e))
             pass
 
     def execute_tool(self, tool_name, arguments):
@@ -342,7 +345,7 @@ class NetOpsTools:
 
         # 清理回显
         lines = output.split('\n')
-        filtered = [l for l in lines if cmd not in l]
+        filtered = [link for link in lines if cmd not in link]
         return '\n'.join(filtered).strip()
 
     def _ssh_connect(self, device_name, commands, skip_backup=False):
@@ -427,7 +430,6 @@ class NetOpsTools:
     def _save_config_snapshot(self, device):
         """执行配置命令前，自动备份当前 running-config"""
         try:
-            import hashlib
             from datetime import datetime
             dev_label = device.get('remark') or device.get('name') or 'unknown'
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -458,7 +460,8 @@ class NetOpsTools:
             else:
                 return None
         except Exception as e:
-            import sys; sys.stderr.write(f'Snapshot error: {e}\n')
+            import sys
+            sys.stderr.write(f'Snapshot error: {e}\n')
             return None
 
     def rollback_config(self, device_name, snapshot_id):
@@ -477,7 +480,7 @@ class NetOpsTools:
             return {"success": False, "error": f"设备 {device_name} 不存在"}
 
         dev_label = device.get('remark') or device.get('name')
-        config_lines = [l.strip() for l in saved_config.split('\n') if l.strip() and not l.startswith('#')]
+        config_lines = [link.strip() for link in saved_config.split('\n') if link.strip() and not link.startswith('#')]
 
         if len(config_lines) > 100:
             return {"success": False, "error": f"配置超过 100 行({len(config_lines)}行)，建议手动回滚。快照已保存: {snapshot_path}"}
@@ -520,13 +523,15 @@ class NetOpsTools:
             return {"success": False, "error": f"设备 {device_name} 不存在"}
 
         try:
+            import time
             from netmiko import ConnectHandler
 
             vendor = device.get("vendor", "huawei")
             username = device.get("username") or ""
             password = device.get("password") or ""
 
-            # 免凭证 Telnet 用 generic_termserver_telnet
+            # 免凭证 Telnet：用 generic_termserver_telnet（厂商驱动强制认证，免凭证连不上）
+            # 有凭证时用厂商驱动（能自动识别prompt和分页）
             if not username and not password:
                 device_type = "generic_termserver_telnet"
             else:
@@ -541,17 +546,32 @@ class NetOpsTools:
                 "device_type": device_type,
                 "host": device.get("ip"),
                 "port": device.get("port", 23),
-                "username": username,
-                "password": password,
                 "timeout": 15,
                 "conn_timeout": 8,
             }
+            if username:
+                conn_params["username"] = username
+            if password:
+                conn_params["password"] = password
 
             results = []
             with ConnectHandler(**conn_params) as conn:
-                self._skip_auto_config(conn, vendor)
+                # H3C/Huawei 免凭证：中断 auto-config 提示
+                if not username and not password and vendor in ("h3c", "huawei"):
+                    conn.write_channel("\x03")  # Ctrl+C
+                    time.sleep(2)
+                    conn.write_channel("\n")   # Enter to get prompt
+                    time.sleep(1)
+                    conn.read_channel()  # 丢弃 auto-config 提示
+
                 for cmd in commands:
-                    output = self._send_cmd(conn, cmd, vendor)
+                    if not username and not password:
+                        # generic_termserver 不支持 send_command，用原始通道
+                        conn.write_channel(cmd + "\n")
+                        time.sleep(2)
+                        output = conn.read_channel()
+                    else:
+                        output = self._send_cmd(conn, cmd, vendor)
                     results.append({"command": cmd, "output": output})
 
             return {"success": True, "device": device.get("remark") or device.get("name"), "results": results}

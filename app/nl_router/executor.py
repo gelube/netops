@@ -9,7 +9,7 @@ from app.nl_router.parser import ParsedIntent, IntentParser
 from app.session import SessionManager
 from app.session.models import TurnRole
 from app.audit import AuditLogger, AuditEntry
-from app.network.command_guard import CommandGuard, ConfigBackup
+from app.network.command_guard import CommandGuard
 
 
 @dataclass
@@ -24,11 +24,11 @@ class ExecutionResult:
 
 class NLExecutor:
     """自然语言执行器（纯 SSH 模式）"""
-    
+
     def __init__(self, llm_client=None, credential_manager=None, session_manager=None, audit_logger=None):
         """
         初始化
-        
+
         Args:
             llm_client: LLM 客户端
             credential_manager: 凭证管理器（可选）
@@ -40,11 +40,11 @@ class NLExecutor:
         self.session_manager = session_manager or SessionManager()
         self.audit_logger = audit_logger or AuditLogger()
         self.intent_parser = IntentParser(llm_client) if llm_client else None
-    
+
     def execute(self, user_input: str, user_id: str = "default") -> ExecutionResult:
         """
         执行用户自然语言请求
-        
+
         Args:
             user_input: 用户输入
             user_id: 用户ID（支持多用户）
@@ -58,7 +58,7 @@ class NLExecutor:
             details={"input": user_input},
             result="pending"
         )
-        
+
         if not self.intent_parser:
             audit_entry.result = "failed"
             audit_entry.error = "LLM 客户端未初始化"
@@ -67,24 +67,24 @@ class NLExecutor:
                 success=False,
                 message="LLM 客户端未初始化，无法解析意图"
             )
-        
+
         try:
             # 解析引用（如"那台设备"、"那个VLAN"）
             resolved_input = self._resolve_references(user_input, user_id)
-            
+
             # 获取上下文
             context = self.session_manager.get_context_for_query(user_id, resolved_input)
-            
+
             # 记录用户输入
             self.session_manager.add_turn(
                 user_id=user_id,
                 role=TurnRole.USER,
                 content=user_input
             )
-            
+
             # 解析意图（带上下文）
             intent = self.intent_parser.parse(resolved_input, context=context)
-            
+
             if intent.requires_ssh:
                 result = self._execute_ssh_config(intent)
             elif intent.intent_type.startswith("query_"):
@@ -96,7 +96,7 @@ class NLExecutor:
                     success=False,
                     message=f"未知意图类型：{intent.intent_type}"
                 )
-            
+
             # 记录助手响应
             self.session_manager.add_turn(
                 user_id=user_id,
@@ -105,33 +105,33 @@ class NLExecutor:
                 execution_success=result.success,
                 execution_data=result.data or {}
             )
-            
+
             # 更新审计条目
             audit_entry.action = intent.intent_type
             audit_entry.target = str(intent.device_hostname) if intent.device_hostname else ""
             audit_entry.details = intent.parameters
             audit_entry.result = "success"
-            
+
             return result
-        
+
         except Exception as e:
             audit_entry.result = "failed"
             audit_entry.error = str(e)
             raise
         finally:
             self.audit_logger.log(audit_entry)
-    
+
     def _execute_query(self, intent: ParsedIntent) -> ExecutionResult:
         """执行查询类请求"""
         device_ip = intent.device_ip or intent.parameters.get("device_ip", "")
         device_hostname = intent.device_hostname
-        
+
         if not device_ip and not device_hostname:
             return ExecutionResult(
                 success=False,
                 message="查询需要指定设备。用法：'查一下 SW-Core (IP: 192.168.1.1) 的配置'"
             )
-        
+
         return ExecutionResult(
             success=True,
             message="已生成查询命令，需要 SSH 凭证",
@@ -143,19 +143,19 @@ class NLExecutor:
                 "device_ip": device_ip,
             }
         )
-    
+
     def _execute_ssh_config(self, intent: ParsedIntent) -> ExecutionResult:
         """执行 SSH 配置"""
         if not self.llm_client:
             return ExecutionResult(success=False, message="LLM 客户端未初始化")
-        
+
         device_hostname = intent.device_hostname
         device_ip = intent.parameters.get("device_ip", "")
         vendor_str = intent.parameters.get("vendor", "huawei")
-        
+
         if not device_hostname and not device_ip:
             return ExecutionResult(success=False, message="未指定设备，无法执行配置")
-        
+
         if not device_ip:
             return ExecutionResult(
                 success=False,
@@ -163,7 +163,7 @@ class NLExecutor:
                 requires_confirmation=True,
                 confirmation_details=f"请在命令中指定设备 IP，例如：\n给 {device_hostname} (IP: 192.168.1.1) 配 VLAN 10"
             )
-        
+
         from app.core.device import Vendor
         vendor_map = {
             "huawei": Vendor.HUAWEI,
@@ -172,24 +172,24 @@ class NLExecutor:
             "juniper": Vendor.JUNIPER,
         }
         vendor = vendor_map.get(vendor_str.lower(), Vendor.HUAWEI)
-        
+
         # 确定netmiko device_type用于安全校验
         from app.network.ssh import DeviceConnection
         netmiko_type = DeviceConnection.VENDOR_DEVICE_TYPE_MAP.get(vendor, "cisco_ios")
-        
+
         commands = self.intent_parser.generate_config_commands(
             intent=intent,
             vendor=vendor.value,
             device_hostname=device_hostname or "device"
         )
-        
+
         if not commands:
             return ExecutionResult(success=False, message="未能生成配置命令")
-        
+
         # ===== 新增：命令安全校验 =====
         guard = CommandGuard(vendor=netmiko_type, strict_mode=True)
         guard_result = guard.check_commands(commands)
-        
+
         # 如果有被拦截的命令，拒绝执行
         if guard_result.blocked_commands:
             report = guard.format_guard_report(guard_result)
@@ -200,16 +200,16 @@ class NLExecutor:
                 confirmation_details=report,
                 data={"guard_result": guard_result, "commands": commands},
             )
-        
+
         confirmation_details = self._format_confirmation(
             device_hostname or "device", device_ip, vendor.value, commands
         )
-        
+
         # 附加安全检查报告
         if guard_result.warnings or guard_result.requires_backup:
             report = guard.format_guard_report(guard_result)
             confirmation_details += f"\n\n{report}"
-        
+
         return ExecutionResult(
             success=True,
             message="已生成配置命令，等待确认",
@@ -223,52 +223,52 @@ class NLExecutor:
                 "guard_result": guard_result,  # 传递安全检查结果
             }
         )
-    
+
     def confirm_and_execute(
-        self, 
-        confirmed: bool, 
+        self,
+        confirmed: bool,
         device_data: Dict[str, Any],
-        username: str, 
+        username: str,
         password: str,
     ) -> ExecutionResult:
         """用户确认后执行配置 — 统一走 CommandService"""
         if not confirmed:
             return ExecutionResult(success=False, message="用户取消配置")
-        
+
         device_ip = device_data.get("device_ip", "")
         commands = device_data.get("commands", [])
         vendor = device_data.get("vendor", "huawei")
         guard_result = device_data.get("guard_result")
-        
+
         if not device_ip or not commands:
             return ExecutionResult(success=False, message="设备数据不完整")
-        
+
         # 检查安全校验结果——如果有被拦截的命令，不允许执行
         if guard_result and guard_result.blocked_commands:
             return ExecutionResult(
                 success=False,
                 message=f"安全检查未通过，{len(guard_result.blocked_commands)} 条命令被拦截，拒绝执行"
             )
-        
+
         # 统一走 CommandService
         from app.network.command_service import CommandService
         dev_info = CommandService.device_from_dict(
             {'ip': device_ip, 'vendor': vendor},
             credentials={'username': username, 'password': password}
         )
-        
+
         # 过滤被拦截的命令
         if guard_result:
             safe_commands = [r.command for r in guard_result.results if r.is_allowed]
         else:
             safe_commands = commands
-        
+
         cmd_result = CommandService().execute(
             dev_info, safe_commands,
             source='confirmed',
             auto_backup=True,
         )
-        
+
         if cmd_result.success:
             return ExecutionResult(
                 success=True,
@@ -281,12 +281,12 @@ class NLExecutor:
                 message=f"执行失败：{cmd_result.error}",
                 data={"results": cmd_result.outputs, "backup_available": bool(cmd_result.backup_id)}
             )
-    
+
     def _execute_diagnosis(self, intent: ParsedIntent) -> ExecutionResult:
         """执行诊断工作流（基于 SSH）"""
         diagnosis_type = intent.intent_type
         params = intent.parameters
-        
+
         if diagnosis_type == "diagnose_vlan":
             return self._diagnose_vlan(params)
         elif diagnosis_type == "diagnose_routing":
@@ -301,29 +301,29 @@ class NLExecutor:
                                         params.get("device_ip", ""), "", "")
         else:
             return ExecutionResult(success=False, message=f"未知诊断类型：{diagnosis_type}")
-    
+
     def _diagnose_vlan(self, params: Dict[str, Any]) -> ExecutionResult:
         """VLAN 故障诊断（基于 SSH）"""
         vlan_id = params.get("vlan_id", 0)
         symptom = params.get("symptom", "")
         device_ip = params.get("device_ip", "")
         device_hostname = params.get("device_hostname", "")
-        
+
         if not vlan_id:
             return ExecutionResult(success=False, message="未指定 VLAN ID")
-        
+
         if not device_ip and not device_hostname:
             return ExecutionResult(
                 success=False,
                 message="诊断需要指定设备。用法：'VLAN 10 上不了网，查一下 SW-Core (IP: 192.168.1.1)'"
             )
-        
+
         # 检查凭证
         if device_hostname and self.credential_manager:
             cred = self.credential_manager.get_credential(device_hostname)
         else:
             cred = None
-        
+
         if not cred:
             # 需要用户提供凭证
             steps = ["检查 VLAN 是否创建", "检查接口是否加入 VLAN", "检查 Trunk 是否允许 VLAN", "检查 SVI 接口状态", "检查默认路由"]
@@ -335,10 +335,10 @@ class NLExecutor:
                 confirmation_details=f"诊断目标：{device_hostname or device_ip}\nVLAN: {vlan_id}\n症状：{symptom}\n\n诊断步骤:\n{steps_text}\n\n请提供 SSH 凭证或使用 !save 命令保存凭证",
                 data={"type": "vlan", "vlan_id": vlan_id, "symptom": symptom, "device": device_hostname, "device_ip": device_ip}
             )
-        
+
         # 执行实际诊断
         return self._run_diagnosis("vlan", params, device_ip or cred.ip, cred.username, cred.password)
-    
+
     def _diagnose_routing(self, params: Dict[str, Any]) -> ExecutionResult:
         """路由故障诊断（基于 SSH）"""
         source_ip = params.get("source_ip", "")
@@ -346,16 +346,16 @@ class NLExecutor:
         symptom = params.get("symptom", "路由不通")
         device_ip = params.get("device_ip", "")
         device_hostname = params.get("device_hostname", "")
-        
+
         if not source_ip or not dest_ip:
             return ExecutionResult(success=False, message="需要指定源 IP 和目标 IP")
-        
+
         # 检查凭证
         if device_hostname and self.credential_manager:
             cred = self.credential_manager.get_credential(device_hostname)
         else:
             cred = None
-        
+
         if not cred and not device_ip:
             steps = ["检查源设备路由表", "检查 OSPF/BGP 邻居状态", "检查静态路由配置", "检查目标设备路由表"]
             steps_text = "\n".join([f"  {i+1}. {s}" for i, s in enumerate(steps)])
@@ -366,20 +366,20 @@ class NLExecutor:
                 confirmation_details=f"诊断路径：{source_ip} → {dest_ip}\n症状：{symptom}\n\n诊断步骤:\n{steps_text}\n\n请提供 SSH 凭证",
                 data={"type": "routing", "source_ip": source_ip, "dest_ip": dest_ip, "symptom": symptom}
             )
-        
+
         # 执行实际诊断
-        return self._run_diagnosis("routing", params, device_ip or (cred.ip if cred else ""), 
+        return self._run_diagnosis("routing", params, device_ip or (cred.ip if cred else ""),
                                          cred.username if cred else "", cred.password if cred else "")
-    
+
     def _diagnose_connectivity(self, params: Dict[str, Any]) -> ExecutionResult:
         """连通性故障诊断（基于 SSH）"""
         source_ip = params.get("source_ip", "")
         dest_ip = params.get("dest_ip", "")
         symptom = params.get("symptom", "ping 不通")
-        
+
         if not source_ip or not dest_ip:
             return ExecutionResult(success=False, message="需要指定源 IP 和目标 IP")
-        
+
         steps = [
             "检查源设备接口状态",
             "检查 ACL/防火墙规则",
@@ -387,7 +387,7 @@ class NLExecutor:
             "执行 ping 测试",
             "执行 traceroute 测试",
         ]
-        
+
         diagnosis_plan = {
             "type": "connectivity",
             "source_ip": source_ip,
@@ -395,7 +395,7 @@ class NLExecutor:
             "symptom": symptom,
             "steps": steps,
         }
-        
+
         steps_text = "\n".join([f"  {i+1}. {s}" for i, s in enumerate(steps)])
         return ExecutionResult(
             success=True,
@@ -452,15 +452,15 @@ class NLExecutor:
             f"📝 即将执行 {len(commands)} 条配置命令：",
             ""
         ]
-        
+
         for i, cmd in enumerate(commands, 1):
             lines.append(f"  {i}. {cmd}")
-        
+
         lines.append("")
         lines.append("配置将立即生效，请确认无误后执行")
-        
+
         return "\n".join(lines)
-    
+
     # 引用解析映射表（中文+英文）
     _REFERENCE_PATTERNS = [
         # (匹配正则, 替换模板, 引用key)

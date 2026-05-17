@@ -6,9 +6,13 @@
 """
 import os
 import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Optional
 from pathlib import Path
 from dataclasses import dataclass
+
+from app.logger import get_logger
+
+log = get_logger(__name__)
 
 
 @dataclass
@@ -26,28 +30,28 @@ class ConfigTemplate:
 
 class ConfigTemplateLibrary:
     """配置模板库"""
-    
+
     def __init__(self, template_dir: Optional[str] = None):
         """
         初始化
-        
+
         Args:
             template_dir: 模板目录
         """
         self.template_dir = template_dir or os.path.join(
             os.path.expanduser("~/.netops-ai/templates")
         )
-        
+
         # 内置模板
         self._builtin_templates = self._load_builtin_templates()
-        
+
         # 确保模板目录存在
         Path(self.template_dir).mkdir(parents=True, exist_ok=True)
-    
+
     def _load_builtin_templates(self) -> Dict[str, ConfigTemplate]:
         """加载内置模板"""
         templates = {}
-        
+
         # 模板 1: VLAN 批量配置（华为）
         templates["vlan_batch_access"] = ConfigTemplate(
             id="vlan_batch_access",
@@ -66,7 +70,7 @@ quit
 """,
             example_usage="给 SW-Core 的 1-4 口配 VLAN 10",
         )
-        
+
         # 模板 2: VLAN 批量配置（思科）
         templates["vlan_batch_access_cisco"] = ConfigTemplate(
             id="vlan_batch_access_cisco",
@@ -85,7 +89,7 @@ exit
 """,
             example_usage="给 SW-Core 的 1-4 口配 VLAN 10",
         )
-        
+
         # 模板 3: Trunk 配置（华为）
         templates["trunk_config"] = ConfigTemplate(
             id="trunk_config",
@@ -104,7 +108,7 @@ quit
 """,
             example_usage="把 GE0/0/24 配成 trunk，允许 VLAN 10 20 30",
         )
-        
+
         # 模板 4: SVI 接口配置
         templates["svi_config"] = ConfigTemplate(
             id="svi_config",
@@ -123,7 +127,7 @@ quit
 """,
             example_usage="给 VLAN 10 配网关 192.168.10.1/24",
         )
-        
+
         # 模板 5: 静态路由配置
         templates["static_route"] = ConfigTemplate(
             id="static_route",
@@ -140,7 +144,7 @@ quit
 """,
             example_usage="添加静态路由 10.0.0.0/8 下一跳 192.168.1.1",
         )
-        
+
         # 模板 6: 默认路由
         templates["default_route"] = ConfigTemplate(
             id="default_route",
@@ -155,7 +159,7 @@ quit
 """,
             example_usage="添加默认路由指向 192.168.1.1",
         )
-        
+
         # 模板 7: OSPF 基础配置
         templates["ospf_basic"] = ConfigTemplate(
             id="ospf_basic",
@@ -177,7 +181,7 @@ quit
 """,
             example_usage="配置 OSPF 进程 1 区域 0 宣告 192.168.10.0/24",
         )
-        
+
         # 模板 8: 端口安全配置
         templates["port_security"] = ConfigTemplate(
             id="port_security",
@@ -196,7 +200,7 @@ quit
 """,
             example_usage="给 GE0/0/1 配置端口安全，最大 2 个 MAC",
         )
-        
+
         # 模板 9: 接口描述
         templates["interface_description"] = ConfigTemplate(
             id="interface_description",
@@ -214,7 +218,7 @@ quit
 """,
             example_usage="给 GE0/0/1 加描述 'Link to SW-Access-1'",
         )
-        
+
         # 模板 10: 新交换机初始化
         templates["switch_init"] = ConfigTemplate(
             id="switch_init",
@@ -250,15 +254,15 @@ stelnet server enable
 """,
             example_usage="初始化新交换机 SW-Access-1，管理 VLAN 100，IP 192.168.100.1/24，网关 192.168.100.254",
         )
-        
+
         return templates
-    
+
     def get_template(self, template_id: str) -> Optional[ConfigTemplate]:
         """获取模板"""
         # 先查内置模板
         if template_id in self._builtin_templates:
             return self._builtin_templates[template_id]
-        
+
         # 再查用户模板
         user_template_path = os.path.join(self.template_dir, f"{template_id}.json")
         if os.path.exists(user_template_path):
@@ -266,21 +270,22 @@ stelnet server enable
                 with open(user_template_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     return ConfigTemplate(**data)
-            except Exception:
+            except Exception as e:
+                log.warning("加载用户模板失败", path=user_template_path, error=str(e))
                 pass
-        
+
         return None
-    
+
     def list_templates(self, category: Optional[str] = None) -> List[ConfigTemplate]:
         """列出所有模板"""
         templates = list(self._builtin_templates.values())
-        
+
         # 按类别过滤
         if category:
             templates = [t for t in templates if t.category == category]
-        
+
         return templates
-    
+
     def render_template(
         self,
         template_id: str,
@@ -288,29 +293,29 @@ stelnet server enable
     ) -> Optional[str]:
         """
         渲染模板
-        
+
         Args:
             template_id: 模板 ID
             parameters: 参数值
-        
+
         Returns:
             渲染后的配置，如果模板不存在则返回 None
         """
         template = self.get_template(template_id)
         if not template:
             return None
-        
+
         # 替换占位符
         config = template.template_content
         for key, value in parameters.items():
             config = config.replace(f"{{{key}}}", str(value))
-        
+
         return config
-    
+
     def save_template(self, template: ConfigTemplate) -> bool:
         """保存用户自定义模板"""
         template_path = os.path.join(self.template_dir, f"{template.id}.json")
-        
+
         try:
             with open(template_path, "w", encoding="utf-8") as f:
                 json.dump({
@@ -324,7 +329,8 @@ stelnet server enable
                     "example_usage": template.example_usage,
                 }, f, indent=2, ensure_ascii=False)
             return True
-        except Exception:
+        except Exception as e:
+            log.error("保存模板失败", template_id=template.id, error=str(e))
             return False
 
 

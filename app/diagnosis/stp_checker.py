@@ -7,6 +7,10 @@ import re
 from typing import Optional
 from app.diagnosis.base import BaseChecker, DiagnosisResult, CheckStatus
 
+from app.logger import get_logger
+
+log = get_logger(__name__)
+
 
 class STPChecker(BaseChecker):
     """STP/环路故障诊断"""
@@ -29,19 +33,19 @@ class STPChecker(BaseChecker):
             return DiagnosisResult(success=False, root_cause="SSH连接未建立")
 
         # 步骤1: 检查STP是否启用
-        stp_enabled = self._check_stp_enabled()
+        self._check_stp_enabled()
 
         # 步骤2: 检查STP根桥
-        root_bridge = self._check_root_bridge(vlan_id)
+        self._check_root_bridge(vlan_id)
 
         # 步骤3: 检查阻塞端口
-        blocked_ports = self._check_blocked_ports(vlan_id)
+        self._check_blocked_ports(vlan_id)
 
         # 步骤4: 检查TCN（拓扑变更）
-        tcn_status = self._check_tcn(vlan_id)
+        self._check_tcn(vlan_id)
 
         # 步骤5: 检查端口状态异常
-        port_anomaly = self._check_port_anomaly()
+        self._check_port_anomaly()
 
         # LLM分析
         analysis = None
@@ -127,7 +131,7 @@ class STPChecker(BaseChecker):
                 self.add_result(
                     step="检查STP根桥",
                     status=CheckStatus.WARNING,
-                    message=f"本设备为根桥 — 确认是否预期（核心交换机应为根桥）",
+                    message="本设备为根桥 — 确认是否预期（核心交换机应为根桥）",
                     details={"root": root_info, "local": bridge_info},
                     suggestion="如果不是核心交换机，调整STP优先级: stp priority 4096",
                 )
@@ -293,7 +297,7 @@ VLAN: {vlan_id or '全部'}
 {chr(10).join([f"- {r.step}: {r.message}" for r in self.results])}
 """
             return self.analyze_with_llm(self.llm, context, "STP/环路故障的根因是什么？")
-        except:
+        except Exception:
             return None
 
     def _generate_result(self, llm_analysis: str) -> tuple:

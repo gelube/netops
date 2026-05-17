@@ -7,6 +7,9 @@
 """
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
+from app.logger import get_logger
+
+log = get_logger(__name__)
 
 
 @dataclass
@@ -20,24 +23,50 @@ class CommandTemplate:
     generate: callable       # 生成函数 → List[str]
 
 
-def _expand_interfaces(iface_str: str, vendor: str) -> Tuple[str, List[str]]:
+def _mask_to_cidr(mask: str) -> str:
+    """子网掩码转CIDR，已是CIDR格式则直接返回
+
+    '255.255.255.0' → '24'
+    '24' → '24'
+    """
+    if isinstance(mask, int):
+        return str(mask)
+    mask = str(mask).strip()
+    # 已经是CIDR格式
+    if mask.isdigit():
+        return mask
+    # 点分十进制 → CIDR
+    try:
+        parts = mask.split('.')
+        if len(parts) == 4:
+            binary = ''.join(format(int(p), '08b') for p in parts)
+            return str(binary.count('1'))
+    except Exception as e:
+        log.debug("mask转换失败", mask=mask, error=str(e))
+        pass
+    return '24'  # 默认 /24
+
+
+def _expand_interfaces(iface_str: str, vendor: str, context: Dict[str, Any] = None) -> Tuple[str, List[str]]:
     """
     展开接口范围字符串
-    
+
     "1-4" → 华为返回 ("GE0/0/1 to GE0/0/4", ["GE0/0/1","GE0/0/2","GE0/0/3","GE0/0/4"])
     "GE0/0/1-4" → 同上
+
+    context参数可传入 {"interface_prefix": "XGE1/0/", "slot": "1"} 等设备特定信息
     """
     # 已有完整接口名
     if any(iface_str.startswith(p) for p in ('GE', 'Gigabit', 'XGE', '10GE', 'Eth', 'Loop', 'Vlan', 'Port', 'Bridge')):
         return iface_str, [iface_str]
-    
+
     # 纯数字范围
     parts = iface_str.split('-')
     if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
         start, end = int(parts[0]), int(parts[1])
         if start > end:
             start, end = end, start
-        
+
         if vendor in ('huawei', 'huawei_vrpv8'):
             iface_list = [f"GE0/0/{i}" for i in range(start, end + 1)]
             if len(iface_list) > 1:
@@ -56,7 +85,7 @@ def _expand_interfaces(iface_str: str, vendor: str) -> Tuple[str, List[str]]:
         elif vendor == 'juniper_junos':
             # Juniper用set命令，不需要range语法
             return iface_str, [f"ge-0/0/{i}" for i in range(start, end + 1)]
-    
+
     # 单个接口号
     if iface_str.isdigit():
         port = int(iface_str)
@@ -71,7 +100,7 @@ def _expand_interfaces(iface_str: str, vendor: str) -> Tuple[str, List[str]]:
         else:
             name = f"GigabitEthernet0/{port}"
         return name, [name]
-    
+
     return iface_str, [iface_str]
 
 
@@ -129,7 +158,7 @@ HUAWEI_TEMPLATES = [
         param_keys=["target_ip"],
         generate=lambda p: [
             "system-view",
-            "acl number 3000",
+            f"acl number {p.get('acl_number', 3000)}",
             f"rule deny ip source {p.get('target_ip', '0.0.0.0')} 0",
             "quit",
         ],
@@ -141,9 +170,9 @@ def _huawei_vlan_access(params: Dict[str, Any]) -> List[str]:
     if isinstance(params.get("interfaces"), list):
         iface_str = params["interfaces"][0]
     vlan_id = params.get("vlan_id", params.get("vlan", 1))
-    
+
     range_str, iface_list = _expand_interfaces(str(iface_str), "huawei")
-    
+
     cmds = ["system-view"]
     cmds.append(f"vlan batch {vlan_id}")
     cmds.append(f"interface range {range_str}")
@@ -157,9 +186,9 @@ def _huawei_vlan_trunk(params: Dict[str, Any]) -> List[str]:
     if isinstance(params.get("interfaces"), list):
         iface_str = params["interfaces"][0]
     vlan_id = params.get("vlan_id", params.get("vlan", 1))
-    
+
     range_str, _ = _expand_interfaces(str(iface_str), "huawei")
-    
+
     cmds = ["system-view"]
     cmds.append(f"vlan batch {vlan_id}")
     cmds.append(f"interface range {range_str}")
@@ -227,8 +256,9 @@ CISCO_TEMPLATES = [
         generate=lambda p: [
             "enable",
             "configure terminal",
-            f"access-list 100 deny ip host {p.get('target_ip', '0.0.0.0')} any",
-            "access-list 100 permit ip any any",
+            f"ip access-list extended {p.get('acl_name', 'NETOPS_BLOCK')}",
+            f"deny ip host {p.get('target_ip', '0.0.0.0')} any",
+            "permit ip any any",
             "end",
         ],
     ),
@@ -239,9 +269,9 @@ def _cisco_vlan_access(params: Dict[str, Any]) -> List[str]:
     if isinstance(params.get("interfaces"), list):
         iface_str = params["interfaces"][0]
     vlan_id = params.get("vlan_id", params.get("vlan", 1))
-    
+
     range_str, _ = _expand_interfaces(str(iface_str), "cisco_ios")
-    
+
     cmds = ["enable", "configure terminal", f"vlan {vlan_id}", "exit"]
     cmds.append(f"interface range {range_str}")
     cmds.append("switchport mode access")
@@ -254,9 +284,9 @@ def _cisco_vlan_trunk(params: Dict[str, Any]) -> List[str]:
     if isinstance(params.get("interfaces"), list):
         iface_str = params["interfaces"][0]
     vlan_id = params.get("vlan_id", params.get("vlan", 1))
-    
+
     range_str, _ = _expand_interfaces(str(iface_str), "cisco_ios")
-    
+
     cmds = ["enable", "configure terminal", f"vlan {vlan_id}", "exit"]
     cmds.append(f"interface range {range_str}")
     cmds.append("switchport mode trunk")
@@ -319,7 +349,7 @@ H3C_TEMPLATES = [
         param_keys=["target_ip"],
         generate=lambda p: [
             "system-view",
-            "acl basic 2000",
+            f"acl basic {p.get('acl_number', 2000)}",
             f"rule deny source {p.get('target_ip', '0.0.0.0')} 0",
             "quit",
         ],
@@ -331,9 +361,9 @@ def _h3c_vlan_access(params: Dict[str, Any]) -> List[str]:
     if isinstance(params.get("interfaces"), list):
         iface_str = params["interfaces"][0]
     vlan_id = params.get("vlan_id", params.get("vlan", 1))
-    
+
     range_str, _ = _expand_interfaces(str(iface_str), "hp_comware")
-    
+
     cmds = ["system-view", f"vlan {vlan_id}", "quit"]
     cmds.append(f"interface range {range_str}")
     cmds.append("port link-mode bridge")
@@ -346,9 +376,9 @@ def _h3c_vlan_trunk(params: Dict[str, Any]) -> List[str]:
     if isinstance(params.get("interfaces"), list):
         iface_str = params["interfaces"][0]
     vlan_id = params.get("vlan_id", params.get("vlan", 1))
-    
+
     range_str, _ = _expand_interfaces(str(iface_str), "hp_comware")
-    
+
     cmds = ["system-view", f"vlan {vlan_id}", "quit"]
     cmds.append(f"interface range {range_str}")
     cmds.append("port link-type trunk")
@@ -378,7 +408,7 @@ JUNIPER_TEMPLATES = [
         param_keys=["interface", "ip", "mask"],
         generate=lambda p: [
             "configure",
-            f"set interfaces {p.get('interface', 'ge-0/0/0')} unit 0 family inet address {p.get('ip', '0.0.0.0')}/{p.get('mask', '24')}",
+            f"set interfaces {p.get('interface', 'ge-0/0/0')} unit 0 family inet address {p.get('ip', '0.0.0.0')}/{_mask_to_cidr(p.get('mask', '24'))}",
             "commit",
             "exit",
         ],
@@ -403,10 +433,10 @@ def _juniper_vlan_access(params: Dict[str, Any]) -> List[str]:
     if isinstance(params.get("interfaces"), list):
         iface_str = params["interfaces"][0]
     vlan_id = params.get("vlan_id", params.get("vlan", 1))
-    
+
     _, iface_list = _expand_interfaces(str(iface_str), "juniper_junos")
     vlan_name = f"v{vlan_id}"
-    
+
     cmds = ["configure", f"set vlans {vlan_name} vlan-id {vlan_id}"]
     for iface in iface_list:
         cmds.append(f"set interfaces {iface} unit 0 family ethernet-switching vlan members {vlan_name}")
@@ -465,19 +495,19 @@ class TemplateMatcher:
             命令列表，或 None（无匹配模板时返回None，走LLM兜底）
         """
         template_key = cls.VENDOR_TO_TEMPLATE_KEY.get(vendor, vendor)
-        
+
         # 查找模板
         vendor_templates = _TEMPLATES_BY_VENDOR_INTENT.get(template_key, {})
         candidates = vendor_templates.get(intent_type, [])
-        
+
         if not candidates:
             # 尝试直接用vendor值查找
             vendor_templates = _TEMPLATES_BY_VENDOR_INTENT.get(vendor, {})
             candidates = vendor_templates.get(intent_type, [])
-        
+
         if not candidates:
             return None
-        
+
         # 匹配最合适的模板
         for template in candidates:
             # 检查必需参数是否齐全
@@ -487,9 +517,9 @@ class TemplateMatcher:
                     if commands:
                         return commands
                 except Exception as e:
-                    print(f"模板 {template.name} 生成失败: {e}")
+                    log.error(f"模板 {template.name} 生成失败", error=str(e))
                     continue
-        
+
         return None
 
     # 参数别名映射

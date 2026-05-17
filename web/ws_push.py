@@ -3,9 +3,8 @@
 """
 WebSocket推送服务 — 诊断进度、命令执行结果实时推送
 """
-import threading
-from typing import Optional, Dict, Any
-from flask_socketio import SocketIO, emit
+from typing import Optional, Dict
+from flask_socketio import SocketIO
 
 # 全局SocketIO实例
 socketio: Optional[SocketIO] = None
@@ -14,7 +13,7 @@ socketio: Optional[SocketIO] = None
 def init_socketio(app):
     """初始化SocketIO（在app创建后调用）"""
     global socketio
-    socketio = SocketIO(app, cors_allowed_origins=["http://localhost:*", "http://127.0.0.1:*"], async_mode='threading')
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
     return socketio
 
 

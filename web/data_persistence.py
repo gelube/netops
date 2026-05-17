@@ -6,6 +6,10 @@ import json
 import os
 from pathlib import Path
 
+from app.logger import get_logger
+
+log = get_logger(__name__)
+
 CONFIG_DIR = Path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 CONFIG_DIR.mkdir(exist_ok=True)
 
@@ -19,7 +23,7 @@ def save_topology(topology_data):
             json.dump(topology_data, f, ensure_ascii=False, indent=2)
         return True
     except Exception as e:
-        print(f"保存拓扑失败: {e}")
+        log.error("保存拓扑失败", error=str(e))
         return False
 
 def load_topology():
@@ -29,7 +33,7 @@ def load_topology():
             with open(TOPOLOGY_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
     except Exception as e:
-        print(f"加载拓扑失败: {e}")
+        log.error("加载拓扑失败", error=str(e))
     return None
 
 def save_llm_config(config_data):
@@ -46,7 +50,7 @@ def save_llm_config(config_data):
             json.dump(save_data, f, ensure_ascii=False, indent=2)
         return True
     except Exception as e:
-        print(f"保存LLM配置失败: {e}")
+        log.error("保存LLM配置失败", error=str(e))
         return False
 
 def load_llm_config():
@@ -56,5 +60,5 @@ def load_llm_config():
             with open(LLM_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
     except Exception as e:
-        print(f"加载LLM配置失败: {e}")
+        log.error("加载LLM配置失败", error=str(e))
     return None

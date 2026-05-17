@@ -4,12 +4,12 @@
 意图类型定义 - 纯 SSH 模式
 """
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict
 
 
 class IntentType(str, Enum):
     """意图类型枚举"""
-    
+
     # === 查询类（SSH 执行）===
     QUERY_DEVICE = "query_device"          # 查询设备信息
     QUERY_CONFIG = "query_config"          # 查看设备配置
@@ -17,13 +17,13 @@ class IntentType(str, Enum):
     QUERY_PATH = "query_path"              # 路径查询
     QUERY_EVENTS = "query_events"          # 事件查询（本地日志）
     RUN_DIAGNOSIS = "run_diagnosis"        # 触发诊断
-    
+
     # === 配置类（SSH 执行）===
     CONFIG_VLAN = "config_vlan"            # 配置 VLAN
     CONFIG_INTERFACE = "config_interface"  # 配置接口
     CONFIG_ROUTING = "config_routing"      # 配置路由
     CONFIG_ACL = "config_acl"              # 配置 ACL
-    
+
     # === 诊断类（SSH 工作流）===
     DIAGNOSE_VLAN = "diagnose_vlan"        # VLAN 诊断
     DIAGNOSE_ROUTING = "diagnose_routing"  # 路由诊断

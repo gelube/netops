@@ -3,10 +3,8 @@ SSH连接模块
 使用Netmiko连接网络设备
 """
 import socket
-import time
-from typing import Optional, Dict, Any, List
+from typing import Optional, List
 from dataclasses import dataclass
-from enum import Enum
 
 try:
     from netmiko import ConnectHandler
@@ -19,6 +17,9 @@ except ImportError:
 from app.core.device import Vendor, Device, Interface, PortType, PortStatus
 from app.core.vendor import VendorIdentifier
 from app.network.commands import CommandBuilder
+from app.logger import get_logger
+
+log = get_logger(__name__)
 
 
 @dataclass
@@ -33,7 +34,7 @@ class ConnectionInfo:
 
 class DeviceConnection:
     """设备连接管理器"""
-    
+
     # Netmiko设备类型映射
     VENDOR_DEVICE_TYPE_MAP = {
         Vendor.HUAWEI: "huawei",
@@ -56,22 +57,24 @@ class DeviceConnection:
         Vendor.CISCO_NXOS: "cisco_nxos",
         Vendor.CISCO_XR: "cisco_xr",
     }
-    
+
     def __init__(self, conn_info: ConnectionInfo, timeout: int = 30):
         self.conn_info = conn_info
         self.timeout = timeout
         self.connection = None
         self.vendor = Vendor.UNKNOWN
         self.device_info: Optional[Device] = None
-    
+        self._autodetect_connection = None  # 复用 autodetect 的连接
+        self._autodetect_device_type = None
+
     def connect(self) -> bool:
         """建立SSH连接"""
         if not NETMIKO_AVAILABLE:
             raise ImportError("netmiko未安装，请运行: pip install netmiko")
-        
+
         # 确定设备类型
         device_type = self._get_device_type()
-        
+
         # 构建连接参数
         device_params = {
             'device_type': device_type,
@@ -82,9 +85,21 @@ class DeviceConnection:
             'timeout': self.timeout,
             'global_delay_factor': 0.5,
         }
-        
+
         try:
-            self.connection = ConnectHandler(**device_params)
+            # 复用 autodetect 已建立的连接，避免重复连接
+            if self._autodetect_connection and self._autodetect_device_type == device_type:
+                self.connection = self._autodetect_connection
+                self._autodetect_connection = None  # 防止重复 disconnect
+            else:
+                if self._autodetect_connection:
+                    # 类型不匹配，先断开旧的
+                    try:
+                        self._autodetect_connection.disconnect()
+                    except Exception as e:
+                        log.debug("断开旧autodetect连接失败", error=str(e))
+                    self._autodetect_connection = None
+                self.connection = ConnectHandler(**device_params)
             # 获取设备基本信息
             self.vendor = self._identify_vendor()
             return True
@@ -94,7 +109,7 @@ class DeviceConnection:
             raise Exception(f"连接超时: {self.conn_info.ip}")
         except Exception as e:
             raise Exception(f"连接失败 {self.conn_info.ip}: {str(e)}")
-    
+
     # prompt/输出特征 → netmiko device_type 映射（用于快速检测）
     # 注意：正则从具体到通用排列，先匹配的特殊模式优先
     PROMPT_VENDOR_MAP = [
@@ -121,7 +136,7 @@ class DeviceConnection:
     }
 
     def _get_device_type(self) -> str:
-        """获取netmiko设备类型 — 智能检测，不再暴力尝试17种类型"""
+        """获取netmiko设备类型 — 智能检测，最少连接次数"""
         if self.conn_info.device_type != "auto":
             return self.conn_info.device_type
 
@@ -136,11 +151,16 @@ class DeviceConnection:
                 timeout=15,
             )
             best_match = guesser.autodetect()
-            guesser.connection.disconnect()
-            if best_match:
+            # SSHDetect 内部已建立连接，autodetect 成功后直接复用该连接作为正式连接
+            if best_match and guesser.connection:
+                # 保存连接以复用，避免再连一次
+                self._autodetect_connection = guesser.connection
+                self._autodetect_device_type = best_match
                 return best_match
-        except Exception:
-            pass
+            elif guesser.connection:
+                guesser.connection.disconnect()
+        except Exception as e:
+            log.debug("autodetect 失败，尝试策略2", error=str(e))
 
         # 策略2：用cisco_ios连一次，读版本信息本地判断
         try:
@@ -152,19 +172,27 @@ class DeviceConnection:
                 password=self.conn_info.password,
                 timeout=15,
             )
-            # 读提示符和版本
+            # 读版本信息
             prompt = temp_conn.find_prompt() or ''
             try:
                 version_output = temp_conn.send_command_timing('show version', delay_factor=1, timeout=10)
-            except Exception:
+            except Exception as e:
+                log.debug("读取版本信息失败", error=str(e))
                 version_output = ''
-            temp_conn.disconnect()
 
             detected = self._detect_type_from_output(prompt, version_output)
-            if detected:
+            if detected and detected != 'cisco_ios':
+                # 检测到不同类型，需要重连；但断开当前连接
+                temp_conn.disconnect()
                 return detected
-        except Exception:
-            pass
+            # cisco_ios 就是当前连接类型，复用
+            if detected == 'cisco_ios':
+                self._autodetect_connection = temp_conn
+                self._autodetect_device_type = 'cisco_ios'
+                return 'cisco_ios'
+            temp_conn.disconnect()
+        except Exception as e:
+            log.debug("策略2 cisco_ios探测失败，使用默认类型", error=str(e))
 
         # 默认cisco_ios
         return 'cisco_ios'
@@ -187,91 +215,92 @@ class DeviceConnection:
                 return dtype
 
         return ''
-    
+
     def _identify_vendor(self) -> Vendor:
         """识别厂商"""
         try:
             version_output = self.execute_command(CommandBuilder.get_version(Vendor.UNKNOWN))
             vendor, model, device_type = VendorIdentifier.identify_from_command_output(version_output)
             return vendor
-        except:
+        except Exception as e:
+            log.debug("识别厂商失败", error=str(e))
             return Vendor.UNKNOWN
-    
+
     def execute_command(self, command: str, timeout: int = 30) -> str:
         """执行命令"""
         if not self.connection:
             raise Exception("未连接设备")
-        
+
         output = self.connection.send_command_timing(
             command,
             delay_factor=1,
             timeout=timeout
         )
         return output
-    
+
     def disconnect(self) -> None:
         """断开连接"""
         if self.connection:
             self.connection.disconnect()
             self.connection = None
-    
+
     def get_device_info(self) -> Device:
         """获取设备完整信息"""
         device = Device(ip=self.conn_info.ip)
-        
+
         try:
             # 获取版本信息
             version_output = self.execute_command(CommandBuilder.get_version(self.vendor))
             vendor, model, device_type = VendorIdentifier.identify_from_command_output(version_output)
-            
+
             device.vendor = vendor if vendor != Vendor.UNKNOWN else self.vendor
             device.model = model
             device.device_type = device_type
-            
+
             # 提取更多信息
             device.os_version = self._parse_os_version(version_output)
             device.name = self._parse_hostname(version_output)
-            
+
             # 获取接口信息
             self._populate_interfaces(device)
-            
+
         except Exception as e:
-            print(f"获取设备信息失败: {e}")
-        
+            log.error("获取设备信息失败", error=str(e))
+
         return device
-    
+
     def _parse_hostname(self, output: str) -> str:
         """解析主机名"""
         import re
-        
+
         # 华为
         match = re.search(r'Huawei\s+(\S+)', output, re.IGNORECASE)
         if match:
             return match.group(1)
-        
+
         # 思科
         match = re.search(r'(\S+) uptime', output)
         if match:
             return match.group(1)
-        
+
         return self.conn_info.ip
-    
+
     def _parse_os_version(self, output: str) -> str:
         """解析OS版本"""
         import re
-        
+
         # 华为: Ver V200R019C10SPH200
         match = re.search(r'Ver(?:sion)?\s+([A-Z0-9]+)', output, re.IGNORECASE)
         if match:
             return match.group(1)
-        
+
         # 思科: Version 15.2(4)E
         match = re.search(r'Version\s+([^\s,]+)', output, re.IGNORECASE)
         if match:
             return match.group(1)
-        
+
         return ""
-    
+
     def _populate_interfaces(self, device: Device) -> None:
         """填充接口信息"""
         try:
@@ -280,34 +309,34 @@ class DeviceConnection:
             interfaces = self._parse_ip_interface_brief(output, self.vendor)
             device.interfaces.extend(interfaces)
         except Exception as e:
-            print(f"获取接口信息失败: {e}")
-    
+            log.error("获取接口信息失败", error=str(e))
+
     def _parse_ip_interface_brief(self, output: str, vendor: Vendor) -> List[Interface]:
         """解析IP接口简要信息"""
         interfaces = []
         lines = output.strip().split('\n')
-        
+
         # 跳过标题行
         for line in lines[1:]:
             line = line.strip()
             if not line:
                 continue
-            
+
             # 根据厂商解析
             if vendor == Vendor.HUAWEI or vendor == Vendor.H3C:
-                # 格式: Interface         IP Address      Physical  Protocol 
+                # 格式: Interface         IP Address      Physical  Protocol
                 #       GE0/0/0          10.0.0.1      up       up
                 parts = line.split()
                 if len(parts) >= 4:
                     iface = Interface(name=parts[0])
                     if parts[1] != '--' and parts[1] != 'unassigned':
                         iface.ip = parts[1]
-                    
+
                     if 'up' in line.lower():
                         iface.status = PortStatus.UP
                     elif 'down' in line.lower():
                         iface.status = PortStatus.DOWN
-                    
+
                     # 判断类型
                     if 'Loopback' in parts[0]:
                         iface.port_type = PortType.LOOPBACK
@@ -315,9 +344,9 @@ class DeviceConnection:
                         iface.port_type = PortType.VLAN_INTERFACE
                     elif 'Eth-trunk' in parts[0] or 'Po' in parts[0]:
                         iface.port_type = PortType.AGGREGATE
-                    
+
                     interfaces.append(iface)
-            
+
             elif vendor == Vendor.CISCO:
                 # 格式: Interface    IP-Address      OK? Method Status    Protocol
                 #         GigabitEthernet0/0  10.0.0.1   YES manual up          up
@@ -326,12 +355,12 @@ class DeviceConnection:
                     iface = Interface(name=parts[0])
                     if parts[1] != 'unassigned':
                         iface.ip = parts[1]
-                    
+
                     if 'up' in parts[4].lower():
                         iface.status = PortStatus.UP
                     elif 'down' in parts[4].lower():
                         iface.status = PortStatus.DOWN
-                    
+
                     # 判断类型
                     if 'Loopback' in parts[0]:
                         iface.port_type = PortType.LOOPBACK
@@ -339,15 +368,15 @@ class DeviceConnection:
                         iface.port_type = PortType.VLAN_INTERFACE
                     elif 'Port-channel' in parts[0]:
                         iface.port_type = PortType.AGGREGATE
-                    
+
                     interfaces.append(iface)
-        
+
         return interfaces
-    
+
     def __enter__(self):
         self.connect()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
 
@@ -359,7 +388,7 @@ def test_connection(ip: str, port: int = 22, timeout: int = 5) -> bool:
     try:
         result = sock.connect_ex((ip, port))
         return result == 0
-    except:
+    except Exception:
         return False
     finally:
         sock.close()
@@ -387,5 +416,5 @@ def get_lldp_neighbors(connection: 'DeviceConnection') -> list:
         return neighbors
 
     except Exception as e:
-        print(f"获取 LLDP 邻居失败：{e}")
+        log.error("获取 LLDP 邻居失败", error=str(e))
         return []

@@ -4,7 +4,14 @@
 拓扑蓝图 - 拓扑发现、渲染、模板管理
 """
 from flask import Blueprint, request, jsonify
-import json, os, re, time
+import json
+import os
+import re
+import time
+
+from app.logger import get_logger
+
+log = get_logger(__name__)
 
 topology_bp = Blueprint('topology', __name__)
 
@@ -134,6 +141,20 @@ def _extract_topology_links(text, local_name):
     if not text or not local_name:
         return links
 
+    # H3C/华为 list格式: 表格行 "GE1/0/1  6208-580d-0100  GigabitEthernet1/0/2  H3C"
+    if re.search(r'Local Interface\s+Chassis ID\s+Port ID\s+System Name', text):
+        for line in text.strip().split('\n'):
+            m = re.match(r'((?:GE|XGE|10GE|40GE|100GE|Eth|Ethernet|GigabitEthernet)\S+)\s+(\S+)\s+(\S+)\s+(\S+)', line.strip())
+            if m and m.group(1) != 'Local':
+                links.append({
+                    'from_name': local_name,
+                    'from_port': m.group(1),
+                    'to_name': m.group(4),
+                    'to_port': m.group(3),
+                })
+        if links:
+            return links
+
     lines = text.strip().split('\n')
     current_entry = {}
 
@@ -207,6 +228,7 @@ def ensure_lldp_on_all_devices(devices):
     from netops_tools import NetOpsTools
     tools = NetOpsTools(_devices_file)
     updated = []
+    log.info(f'ensure_lldp: processing {len(devices)} devices')
 
     for d in devices:
         name = d.get('remark') or d.get('name')
@@ -215,33 +237,61 @@ def ensure_lldp_on_all_devices(devices):
 
         # 已有LLDP数据则跳过
         if d.get('lldp_neighbors'):
+            log.info(f'ensure_lldp: {name} already has LLDP data, skipping')
             updated.append(d)
             continue
 
         # 读取LLDP信息
         try:
-            result = tools.execute_tool('run_commands', {
-                'device': name,
-                'commands': ['display lldp neighbor brief'] if d.get('vendor') in ('huawei', 'h3c')
-                            else ['show lldp neighbors detail']
-            })
-            if result.get('success') and result.get('results'):
-                lldp_text = result['results'][0].get('output', '')
-                d['lldp_neighbors'] = _extract_topology_links(lldp_text, name)
-                updated.append(d)
+            vendor = d.get('vendor', 'auto')
+            if vendor in ('huawei', 'h3c'):
+                cmds_list = [['display lldp neighbor-information list']]
+            elif vendor in ('cisco', 'ruckus'):
+                cmds_list = [['show lldp neighbors detail']]
+            elif vendor == 'juniper':
+                cmds_list = [['show lldp neighbors']]
             else:
+                # auto/unknown: 尝试所有厂商命令
+                cmds_list = [
+                    ['display lldp neighbor-information list'],  # H3C/华为
+                    ['show lldp neighbors detail'],               # Cisco
+                    ['show lldp neighbors'],                     # Juniper
+                ]
+
+            for cmds in cmds_list:
+                log.info(f'LLDP discover: device={name}, vendor={vendor}, cmds={cmds}')
+                result = tools.execute_tool('run_commands', {
+                    'device': name,
+                    'commands': cmds
+                })
+                if result.get('success') and result.get('results'):
+                    lldp_text = result['results'][0].get('output', '')
+                    # 检查是否命令失败（含错误提示）
+                    if any(err in lldp_text for err in ['Unrecognized command', 'Invalid input', '% Error', 'Error:', 'Syntax error']):
+                        log.info(f'LLDP discover: {name} command failed for {cmds}, trying next')
+                        continue
+                    d['lldp_neighbors'] = _extract_topology_links(lldp_text, name)
+                    log.info(f'LLDP discover: {name} parsed {len(d.get("lldp_neighbors",[]))} neighbors, output_len={len(lldp_text)}')
+                    if not d['lldp_neighbors'] and lldp_text:
+                        log.info(f'LLDP discover: {name} raw output: {lldp_text[:300]}')
+                    updated.append(d)
+                    break
+            else:
+                log.warning(f'LLDP discover: {name} all LLDP commands failed')
                 updated.append(d)
-        except Exception:
+        except Exception as e:
+            log.warning(f'LLDP discover: {name} exception: {e}')
             updated.append(d)
 
+    log.info(f'ensure_lldp: done, {sum(1 for d in updated if d.get("lldp_neighbors"))} devices have LLDP data')
     return updated
 
 
-@topology_bp.route('/api/topology/discover', methods=['POST'])
+@topology_bp.route('/api/topology/discover', methods=['POST', 'GET'])
 def topology_discover():
     """拓扑发现"""
     from netops_tools import NetOpsTools
-    tools = NetOpsTools(_devices_file)
+    NetOpsTools(_devices_file)
     data = request.json or {}
     device_filter = data.get('devices', [])
 
@@ -259,18 +309,22 @@ def topology_discover():
     all_links = []
     for d in devices:
         name = d.get('remark') or d.get('name')
-        for link in d.get('lldp_neighbors', []):
+        lldp = d.get('lldp_neighbors', [])
+        log.info(f'discover: {name} has {len(lldp)} lldp_neighbors')
+        for link in lldp:
             link['from_name'] = name
             all_links.append(link)
+
+    log.info(f'discover: total all_links={len(all_links)}')
 
     # 3. 去重（A→B 和 B→A 可能重复）
     seen = set()
     uniq_links = []
-    for l in all_links:
-        from_name = l.get('from_name', '')
-        to_name = l.get('to_name', '')
-        from_port = l.get('from_port', '')
-        to_port = l.get('to_port', '')
+    for link in all_links:
+        from_name = link.get('from_name', '')
+        to_name = link.get('to_name', '')
+        from_port = link.get('from_port', '')
+        to_port = link.get('to_port', '')
         # 排序时端口也要跟着名字一起换
         if from_name > to_name:
             key = (to_name, to_port, from_name, from_port)
@@ -278,7 +332,7 @@ def topology_discover():
             key = (from_name, from_port, to_name, to_port)
         if key not in seen:
             seen.add(key)
-            uniq_links.append(l)
+            uniq_links.append(link)
 
     # 4. 构建节点
     old_state = _load_topology_state()
@@ -290,8 +344,10 @@ def topology_discover():
         nodes.append({
             'id': d.get('id'),
             'name': d.get('name'),
+            'label': d.get('remark') or d.get('name') or d.get('ip') or 'N/A',
             'remark': d.get('remark', ''),
             'ip': d.get('ip') or d.get('serial_port') or 'N/A',
+            'vendor': d.get('vendor', 'unknown'),
             'deviceType': d.get('device_type', 'unknown'),
             'x': old.get('x'),
             'y': old.get('y'),
@@ -299,23 +355,74 @@ def topology_discover():
         })
 
     # 5. 构建边（从链路映射到节点ID）
+    # 先建name/remark/sysname→id映射，sysname重复时不加入
     device_map = {d.get('name'): d.get('id') for d in devices}
     device_map.update({d.get('remark'): d.get('id') for d in devices if d.get('remark')})
+    sysname_count = {}
+    for d in devices:
+        sn = d.get('sysname', '')
+        if sn:
+            sysname_count[sn] = sysname_count.get(sn, 0) + 1
+    for d in devices:
+        sn = d.get('sysname', '')
+        if sn and sysname_count.get(sn, 1) == 1:
+            device_map[sn] = d.get('id')
+
+    # 如果sysname全部重复，用交叉验证匹配
+    all_sysnames_same = len(sysname_count) == 1 and len(devices) > 1
+
+    def _normalize_port(port):
+        """归一化端口名称: GE1/0/2 → GigabitEthernet1/0/2, XGE→10GigabitEthernet等"""
+        if not port:
+            return port
+        import re as _re
+        # H3C/华为缩写映射
+        mappings = [
+            (r'^GE(\d)', r'GigabitEthernet\1'),
+            (r'^XGE(\d)', r'10GigabitEthernet\1'),
+            (r'^10GE(\d)', r'10GigabitEthernet\1'),
+            (r'^XE(\d)', r'10GigabitEthernet\1'),
+            (r'^FE(\d)', r'FastEthernet\1'),
+            (r'^E(\d)', r'Ethernet\1'),
+        ]
+        for pattern, repl in mappings:
+            port = _re.sub(pattern, repl, port)
+        return port
 
     edges = []
-    for l in uniq_links:
-        fid = device_map.get(l.get('from_name'))
-        tid = device_map.get(l.get('to_name'))
-        if fid and tid:
-            fp = l.get('from_port', '')
-            tp = l.get('to_port', '')
-            key = f"{fid}-{fp}-{tid}-{tp}"
-            edges.append({
-                'from': fid, 'to': tid, 'id': f'link_{len(edges)+1}',
-                'from_name': l.get('from_name'), 'to_name': l.get('to_name'),
-                'from_port': fp, 'to_port': tp,
-                'link_type': 'unknown', 'protocol': 'lldp'
-            })
+    if all_sysnames_same:
+        log.info(f'discover: all sysnames same={sysname_count}, using cross-validation')
+        for i, la in enumerate(uniq_links):
+            for lb in uniq_links[i+1:]:
+                la_fp = _normalize_port(la.get('from_port', ''))
+                la_tp = _normalize_port(la.get('to_port', ''))
+                lb_fp = _normalize_port(lb.get('from_port', ''))
+                lb_tp = _normalize_port(lb.get('to_port', ''))
+                if la_fp == lb_tp and la_tp == lb_fp and la.get('to_name') == lb.get('to_name'):
+                    fid = next((d.get('id') for d in devices if d.get('name') == la.get('from_name') or d.get('remark') == la.get('from_name')), None)
+                    tid = next((d.get('id') for d in devices if d.get('name') == lb.get('from_name') or d.get('remark') == lb.get('from_name')), None)
+                    if fid and tid:
+                        edges.append({
+                            'from': fid, 'to': tid,
+                            'id': f'link_{len(edges)+1}',
+                            'from_name': la.get('from_name'), 'to_name': lb.get('from_name'),
+                            'from_port': la.get('from_port'), 'to_port': lb.get('from_port'),
+                            'link_type': 'unknown', 'protocol': 'lldp'
+                        })
+    else:
+        for link in uniq_links:
+            fid = device_map.get(link.get('from_name'))
+            tid = device_map.get(link.get('to_name'))
+            if fid and tid:
+                fp = link.get('from_port', '')
+                tp = link.get('to_port', '')
+                key = f"{fid}-{fp}-{tid}-{tp}"
+                edges.append({
+                    'from': fid, 'to': tid, 'id': f'link_{len(edges)+1}',
+                    'from_name': link.get('from_name'), 'to_name': link.get('to_name'),
+                    'from_port': fp, 'to_port': tp,
+                    'link_type': 'unknown', 'protocol': 'lldp'
+                })
 
     # 6. 保存
     state = _load_topology_state()
@@ -328,8 +435,8 @@ def topology_discover():
     debug_path = os.path.join(_data_dir, '_discover_debug.txt')
     with open(debug_path, 'w', encoding='utf-8') as f:
         f.write(f'Links: {len(edges)}\n')
-        for l in edges:
-            f.write(f"  {l['from_name']} {l['from_port']} -> {l['to_name']} {l['to_port']}\n")
+        for link in edges:
+            f.write(f"  {link['from_name']} {link['from_port']} -> {link['to_name']} {link['to_port']}\n")
 
     return jsonify({
         'success': True,

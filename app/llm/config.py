@@ -7,6 +7,10 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from enum import Enum
 
+from app.logger import get_logger
+
+log = get_logger(__name__)
+
 # Fernet 加密（与 credentials.py 共享密钥）
 try:
     from cryptography.fernet import Fernet
@@ -36,12 +40,12 @@ def _encrypt_api_key(api_key: str) -> str:
         return ''
     f = _get_fernet()
     if f is None:
-        print('[WARN] Fernet 不可用，API Key 将明文存储')
+        log.info('[WARN] Fernet 不可用，API Key 将明文存储')
         return api_key
     try:
         return f.encrypt(api_key.encode()).decode()
     except Exception:
-        print('[WARN] API Key 加密失败，将明文存储')
+        log.error('[WARN] API Key 加密失败，将明文存储')
         return api_key
 
 
@@ -74,42 +78,39 @@ class LLMConfig(BaseModel):
     api_key: str = ""
     model: str = ""
     available_models: List[str] = Field(default_factory=list)
-    
-    def save(self, config_dir: str = None) -> None:
+
+    def save(self, config_dir: str = "~/.netops-ai") -> None:
         """保存配置到文件"""
-        if config_dir is None:
-            # 默认保存到项目 config 目录
-            config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
-        
-        config_path = os.path.join(config_dir, "llm_config.json")
-        
+        config_path = os.path.join(os.path.expanduser(config_dir), "llm_config.json")
+
         # 确保目录存在
-        os.makedirs(config_dir, exist_ok=True)
-        
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+
+        # 简单实现：只保存非敏感配置
         config_data = {
-            "provider": self.provider,
+            "provider": self.provider.value,
             "endpoint": self.endpoint,
             "model": self.model,
-            "api_key": _encrypt_api_key(self.api_key),
         }
-        
+
+        import json
         try:
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config_data, f, indent=2, ensure_ascii=False)
-            print(f"LLM config saved to: {config_path}")
+            log.info(f"LLM config saved to: {config_path}")
         except Exception as e:
-            print(f"Failed to save config: {e}")
+            log.error(f"Failed to save config: {e}")
             raise
-    
+
     @classmethod
     def load(cls, config_dir: str = None) -> "LLMConfig":
         """从文件加载配置"""
         if config_dir is None:
             # 默认从项目 config 目录加载
             config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
-        
+
         config_path = os.path.join(config_dir, "llm_config.json")
-        
+
         if os.path.exists(config_path):
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
@@ -121,50 +122,55 @@ class LLMConfig(BaseModel):
                         api_key=_decrypt_api_key(data.get("api_key", "")),
                     )
             except Exception as e:
-                print(f"Failed to load config: {e}")
-        
+                log.error(f"Failed to load config: {e}")
+
         return cls()
 
 
 class LLMClient:
     """LLM 客户端"""
-    
+
     def __init__(self, config: LLMConfig):
         self.config = config
         self._client = None
-    
+
     def _get_client(self):
         """获取 API 客户端"""
         if self._client is not None:
             return self._client
-        
+
         if self.config.provider == "anthropic":
             try:
                 import anthropic
-                self._client = anthropic.Anthropic(api_key=self.config.api_key)
+                kwargs = {}
+                if self.config.api_key:
+                    kwargs["api_key"] = self.config.api_key
+                self._client = anthropic.Anthropic(**kwargs)
             except ImportError:
                 raise ImportError("Please install anthropic: pip install anthropic")
         else:
             # OpenAI 格式（兼容 OpenAI、阿里云、Ollama 等）
             try:
                 from openai import OpenAI
+                # 免凭证（Ollama等本地部署）：api_key不能传空字符串，用占位符
+                api_key = self.config.api_key or "sk-no-key-required"
                 self._client = OpenAI(
-                    api_key=self.config.api_key,
+                    api_key=api_key,
                     base_url=self.config.endpoint
                 )
             except ImportError:
                 raise ImportError("Please install openai: pip install openai")
-        
+
         return self._client
-    
+
     def chat_simple(self, user_message: str, context: str = "", timeout: int = 10) -> str:
         """简单对话（带超时）"""
         client = self._get_client()
-        
+
         system_prompt = "你是一个网络运维助手。"
         if context:
             system_prompt += "\n" + context
-        
+
         try:
             if self.config.provider == "anthropic":
                 response = client.messages.create(
@@ -188,7 +194,7 @@ class LLMClient:
                 return response.choices[0].message.content
         except Exception as e:
             # 超时或连接失败时返回 None，让调用方降级处理
-            print(f"LLM 调用失败（可能超时）: {e}")
+            log.error(f"LLM 调用失败（可能超时）: {e}")
             return None
 
     def chat(self, messages: list, tools: list = None, temperature: float = 0.7,
@@ -298,9 +304,9 @@ class LLMClient:
                 return result
 
         except Exception as e:
-            print(f"LLM chat 调用失败: {e}")
+            log.error("LLM chat 调用失败", error=str(e))
             return {"content": None, "tool_calls": None, "error": str(e)}
-    
+
     def list_models(self) -> List[str]:
         """获取可用模型列表"""
         try:
@@ -310,29 +316,29 @@ class LLMClient:
                 return [m.id for m in models.data] if hasattr(models, 'data') else []
             return []
         except Exception as e:
-            print(f"Failed to list models: {e}")
+            log.error(f"Failed to list models: {e}")
             return []
 
 
 class LLMConfigManager:
     """LLM 配置管理器"""
-    
+
     _instance = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance.config = LLMConfig.load()
             cls._instance.client = None
         return cls._instance
-    
+
     def get_config(self) -> LLMConfig:
         return self.config
-    
+
     def set_config(self, config: LLMConfig):
         self.config = config
         self.client = None
-    
+
     def get_client(self) -> Optional[LLMClient]:
         if self.client is None and self.config:
             self.client = LLMClient(self.config)

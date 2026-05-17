@@ -7,6 +7,10 @@ import re
 from typing import Optional
 from app.diagnosis.base import BaseChecker, DiagnosisResult, CheckStatus
 
+from app.logger import get_logger
+
+log = get_logger(__name__)
+
 
 class InterfaceChecker(BaseChecker):
     """接口故障诊断"""
@@ -254,7 +258,7 @@ class InterfaceChecker(BaseChecker):
             in_rate = re.search(r'(?:Input|input|In)\s+(?:rate|bandwidth)[:\s]+(\d+)', output, re.IGNORECASE)
             out_rate = re.search(r'(?:Output|output|Out)\s+(?:rate|bandwidth)[:\s]+(\d+)', output, re.IGNORECASE)
 
-            in_bytes = re.search(r'(?:bytes|Bytes)[:\s]+(\d+)', output)
+            re.search(r'(?:bytes|Bytes)[:\s]+(\d+)', output)
 
             details = {}
             if in_rate:
@@ -289,7 +293,7 @@ class InterfaceChecker(BaseChecker):
 {chr(10).join([f"- {r.step}: {r.message}" for r in self.results])}
 """
             return self.analyze_with_llm(self.llm, context, "接口故障的根因是什么？如何修复？")
-        except:
+        except Exception:
             return None
 
     def _generate_result(self, llm_analysis: str) -> tuple:

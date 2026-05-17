@@ -190,9 +190,10 @@
           <div class="msg msg-system">拓扑在上，对话在下。Ctrl+点击拓扑节点可多选设备，多选后操作会批量执行。</div>
         </div>
         <div class="chat-input">
-          <input id="chat-input" placeholder="输入命令或问题，可直接说设备备注名或IP（如：核心交换机查路由表、127.0.0.1查版本）">
+          <input id="chat-input" placeholder="输入命令或问题，可直接说设备名或IP（如：核心交换机查路由表、127.0.0.1查版本）">
           <button class="btn" id="btn-stop" style="display:none;background:#dc2626;border-color:#dc2626;color:#fff;">停止</button>
           <button class="btn" id="btn-send">发送</button>
+          <button class="btn" id="btn-clear-chat" style="background:#475569;border-color:#475569;font-size:12px;padding:4px 10px;" title="清空对话">清空</button>
         </div>
       </section>
     </main>
@@ -224,7 +225,7 @@
         <div class="form-group"><label>串口</label><input id="add-serial" placeholder="COM3"></div>
         <div class="form-group"><label>波特率</label><select id="add-baud"><option value="9600">9600</option><option value="115200" selected>115200</option></select></div>
       </div>
-      <div class="form-group"><label>备注</label><input id="add-remark" placeholder="例如：上海核心"></div>
+      <div class="form-group"><label>设备名称</label><input id="add-remark" placeholder="如：上海核心交换机"></div>
       <div class="form-group"><label>用户名</label><input id="add-user" placeholder="admin"></div>
       <div class="form-group"><label>密码</label><input id="add-pass" type="password"></div>
       <div class="modal-actions">
@@ -241,7 +242,7 @@
       <div class="modal-head"><strong>连接方式编辑</strong><button class="close" onclick="closeModal('modal-conn')">×</button></div>
       <div class="form-group"><label>连接方式</label><select id="conn-type" onchange="toggleConnFields()"><option value="ssh">SSH</option><option value="telnet">Telnet</option><option value="serial">串口</option></select></div>
       <div class="form-group"><label>设备类型</label><select id="conn-device-type"><option value="layer2_switch">二层交换机</option><option value="layer3_switch">三层交换机</option><option value="router">路由器</option><option value="firewall">防火墙</option><option value="unknown">自动识别</option></select></div>
-      <div class="form-group"><label>备注</label><input id="conn-remark" placeholder="例如：核心交换机"></div>
+      <div class="form-group"><label>设备名称</label><input id="conn-remark" placeholder="如：核心交换机"></div>
       <div id="conn-net-fields">
         <div class="form-group"><label>IP</label><input id="conn-ip" placeholder="192.168.1.1"></div>
         <div class="form-group"><label>端口</label><input id="conn-port" value="22"></div>
@@ -283,6 +284,7 @@
     let selectedId = null;
     let selectedIds = new Set();  // 多选设备集合
     let editingDeviceId = null;
+    let currentDetailDevice = null;
     let editingBasicOnly = false;
     let topologyState = { nodes: [], links: [], version: 1 };
     let view = { x: 0, y: 0, scale: 1 };
@@ -311,9 +313,18 @@
       document.getElementById('btn-save-device').onclick = saveDevice;
       document.getElementById('btn-test-device').onclick = testCurrentDevice;
       document.getElementById('btn-delete-device').onclick = deleteCurrentDevice;
+      // 详情弹窗按钮
+      document.getElementById('btn-test-detail').onclick = testCurrentDevice;
+      document.getElementById('btn-conn-edit-detail').onclick = function() {
+        // 关闭详情弹窗，打开连接编辑
+        closeModal('modal-device-detail');
+        if (currentDetailDevice) openConnEditor(currentDetailDevice.id);
+      };
+      document.getElementById('btn-delete-detail').onclick = deleteCurrentDevice;
       document.getElementById('btn-save-conn').onclick = saveConnConfig;
       document.getElementById('btn-send').onclick = sendChat;
       document.getElementById('btn-stop').onclick = stopChat;
+      document.getElementById('btn-clear-chat').onclick = clearChat;
       document.getElementById('chat-input').onkeydown = e => { if (e.key === 'Enter') sendChat(); };
 
       document.getElementById('btn-llm').onclick = () => openModal('modal-llm');
@@ -535,7 +546,7 @@
         document.getElementById('add-port').value = String(d.port || (d.conn_type === 'telnet' ? 23 : 22));
       }
       document.getElementById('add-device-type').value = d.device_type || 'unknown';
-      document.getElementById('add-remark').value = d.remark || '';
+      document.getElementById('add-remark').value = d.remark || d.name || '';
       document.getElementById('add-user').value = d.username || '';
       document.getElementById('add-pass').value = d.password || '';
 
@@ -608,14 +619,33 @@
     async function loadDevices() {
       const r = await fetch('/api/devices');
       const d = await r.json();
-      devices = d.devices || [];
+      devices = Array.isArray(d) ? d : (d.devices || []);
+    }
+
+    async function pingDevice(deviceId) {
+      const dev = devices.find(d => d.id === deviceId);
+      if (!dev) return;
+      try {
+        const r = await fetch('/api/device/ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device: dev.remark || dev.name || dev.ip })
+        });
+        const data = await r.json();
+        const status = data.online ? '✅ 在线' : '❌ 离线';
+        addMsg('system', `${dev.remark || dev.name}: ${status}`);
+        if (data.online) { await loadDevices(); renderAll(); }
+      } catch(e) {
+        addMsg('error', `Ping失败: ${e.message}`);
+      }
     }
 
     async function loadTopologyState() {
       try {
         const r = await fetch('/api/topology/state');
         const d = await r.json();
-        topologyState = d.state || { nodes: [], links: [], version: 1 };
+        // API直接返回state对象，不包在.state里
+        topologyState = d.state || d || { nodes: [], links: [], version: 1 };
       } catch {
         topologyState = { nodes: [], links: [], version: 1 };
       }
@@ -635,7 +665,7 @@
         const existing = oldNodes.find(n => n.id === d.id);
         return {
           id: d.id,
-          name: d.name,
+          name: d.remark || d.name || '',
           remark: d.remark || '',
           ip: d.ip || d.serial_port || 'N/A',
           deviceType: d.device_type || 'unknown',
@@ -775,9 +805,11 @@
           </div>
           <div class="dev-group-body">`;
         groups[type].forEach(d => {
-          const onlineDot = d.facts && d.facts.last_collected ? '<span style="width:6px;height:6px;border-radius:50%;background:#34d399;display:inline-block;margin-right:4px;box-shadow:0 0 4px #34d399;"></span>' : '<span style="width:6px;height:6px;border-radius:50%;background:#6b7280;display:inline-block;margin-right:4px;"></span>';
+          const _lastSeen = d.facts && d.facts.last_collected ? new Date(d.facts.last_collected).getTime() : 0;
+          const _isOnline = _lastSeen && (Date.now() - _lastSeen < 3600000);  // 1小时内才算在线
+          const onlineDot = _isOnline ? '<span style="width:6px;height:6px;border-radius:50%;background:#34d399;display:inline-block;margin-right:4px;box-shadow:0 0 4px #34d399;"></span>' : '<span style="width:6px;height:6px;border-radius:50%;background:#6b7280;display:inline-block;margin-right:4px;"></span>';
           html += `<div class="device-item" onclick="openConnEditor('${d.id}')" ondblclick="selectAndConfigDevice('${d.id}')" title="单击编辑连接 · 双击打开配置">
-            <div class="device-name">${onlineDot}${d.remark || d.name}</div>
+            <div class="device-name">${onlineDot}${d.remark || d.name}<span style="float:right;cursor:pointer;opacity:0.5;font-size:12px;" onclick="event.stopPropagation(); showDeviceDetail('${d.id}')">ℹ️</span></div>
             <div class="device-ip">${d.conn_type || 'ssh'}://${d.ip || d.serial_port || 'N/A'}${d.port ? ':' + d.port : ''}</div>
           </div>`;
         });
@@ -890,7 +922,7 @@
           const selCls = selectedIds.has(n.id) ? ' selected' : '';
           return `
           <div class="topo-node ${cls}${selCls}" data-id="${n.id}" style="left:${n.x}px; top:${n.y}px;" onclick="selectTopoNode('${n.id}', event)" ondblclick="openTopologyDeviceConfig('${n.id}', event)" title="${n.remark || n.name}\nIP: ${n.ip || 'N/A'}\n类型: ${typeLabels[n.deviceType] || n.deviceType}\n${n.facts && n.facts.vlan_count ? 'VLAN: ' + n.facts.vlan_count : ''}\n${n.facts && n.facts.up_interfaces != null ? 'UP接口: ' + n.facts.up_interfaces + '/' + n.facts.total_interfaces : ''}\n单击选中 · 双击打开配置">
-            <div class="topo-head">${iconSvg(t)}<div class="node-remark">${n.remark || n.name || '未命名设备'}</div><span class="node-status ${n.facts && n.facts.last_collected ? 'online' : 'offline'}"></span></div>
+            <div class="topo-head">${iconSvg(t)}<div class="node-remark">${n.remark || n.name || '未命名设备'}</div><span class="node-status ${(() => { const ls = n.facts && n.facts.last_collected ? new Date(n.facts.last_collected).getTime() : 0; return ls && (Date.now() - ls < 3600000) ? 'online' : 'offline'; })()}"></span></div>
             ${chips ? `<div class="node-chips">${chips}</div>` : ''}
           </div>
         `;
@@ -1070,10 +1102,10 @@
       const endpoint = document.getElementById('llm-endpoint').value.trim();
       const api_key = document.getElementById('llm-key').value.trim();
       if (!endpoint) { alert('请输入 Endpoint'); return; }
-      const r = await fetch('/api/llm/test', {
+      const r = await fetch('/api/llm/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint, api_key })
+        body: JSON.stringify({ provider: 'openai', endpoint, api_key })
       });
       const d = await r.json();
       if (!d.success || !(d.models || []).length) { alert(d.message || '获取失败'); return; }
@@ -1272,9 +1304,10 @@
       }
     }
 
-    async function confirmChatExec(btn, cmdsJson, msg, contextJson) {
-      const cmds = JSON.parse(cmdsJson);
-      const context = JSON.parse(contextJson);
+    async function confirmChatExec(btn, cmdsOrJson, msgOrStr, contextOrJson) {
+      const cmds = typeof cmdsOrJson === 'string' ? JSON.parse(cmdsOrJson) : cmdsOrJson;
+      const msg = typeof msgOrStr === 'string' ? msgOrStr : '';
+      const context = typeof contextOrJson === 'string' ? JSON.parse(contextOrJson) : (contextOrJson || {});
       // 禁用按钮防止重复点击
       btn.disabled = true; btn.textContent = '执行中...';
       addMsg('user', msg);
@@ -1286,6 +1319,25 @@
         addMsg('ai', (res.success?'✅ ':'❌ ')+(res.response||res.message||''));
       } catch(e) {
         addMsg('ai', '❌ 执行失败: '+e.message);
+      }
+    }
+
+    async function clearChat() {
+      if (!confirm('清空所有对话记录？')) return;
+      try {
+        const resp = await fetch('/api/chat/clear', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({})
+        });
+        const d = await resp.json();
+        if (d.success) {
+          chatHistory.length = 0;
+          const box = document.getElementById('chat-messages');
+          box.innerHTML = '<div style="color:#64748b;text-align:center;padding:20px;">对话已清空</div>';
+        }
+      } catch(e) {
+        console.error('clear chat error:', e);
       }
     }
 
@@ -1305,7 +1357,7 @@
         context.selected_device = selected[0].name || selected[0].remark;
       } else {
         const d = devices.find(x => x.id === selectedId);
-        if (d) context.selected_device = d.name || d.remark;
+        if (d) context.selected_device = d.remark || d.name;
       }
 
       // ====== 先尝试快速模板匹配（不走 LLM，秒回）======
@@ -1351,9 +1403,6 @@
       _chatAbort = new AbortController();
       document.getElementById('btn-stop').style.display = '';
       document.getElementById('btn-send').style.display = 'none';
-        const d = devices.find(x => x.id === selectedId);
-        if (d) context.selected_device = d.name || d.remark;
-      }
       
       // 思考中占位
       const thinkingHtml = '<div class="chat-msg ai" id="thinking-placeholder"><span style="color:#67e8f9">⏳ 思考中...</span></div>';
@@ -1369,7 +1418,28 @@
         const res = await r.json();
         const tp = document.getElementById('thinking-placeholder');
         if (tp) tp.remove();
-        addMsg('ai', (res.executed ? '✅ ' : '') + (res.response || '无响应'));
+
+        // 如果LLM返回了命令预览，走确认流程
+        if (res.preview && res.planned_commands?.length) {
+          const cmds = res.planned_commands;
+          let previewHtml = '<div style="color:#f59e0b;font-weight:600;margin-bottom:6px;">⚠️ 命令预览</div>';
+          cmds.forEach(c => {
+            previewHtml += `<div style="margin-bottom:6px;"><span style="color:#22d3ee;font-size:12px;font-weight:600;">${c.device}</span>`;
+            previewHtml += `<pre style="background:#0b1220;border:1px solid #334155;border-radius:4px;padding:8px;font-size:12px;overflow-x:auto;">${c.commands.join('\n')}</pre>`;
+            previewHtml += '</div>';
+          });
+          previewHtml += `<div style="display:flex;gap:6px;margin-top:8px;">`;
+          const cmdKey = '_pcmd_' + Date.now();
+          window[cmdKey] = { cmds, msg, context };
+          previewHtml += `<button class="btn" style="background:#16a34a;color:#fff;" onclick="confirmChatExec(this, window['${cmdKey}'].cmds, window['${cmdKey}'].msg, window['${cmdKey}'].context); delete window['${cmdKey}']">确认执行</button>`;
+          previewHtml += `<button class="btn" onclick="this.parentElement.parentElement.remove()">取消</button>`;
+          previewHtml += `</div>`;
+          // 先显示LLM的文本回复
+          if (res.response) addMsg('ai', res.response);
+          addMsg('ai', previewHtml);
+        } else {
+          addMsg('ai', (res.executed ? '✅ ' : '') + (res.response || '无响应'));
+        }
       } catch (e) {
         const tp = document.getElementById('thinking-placeholder');
         if (tp) tp.remove();
@@ -1391,6 +1461,33 @@
     function openConnEditor(id) {
       // 左侧设备点击 → 编辑连接方式（SSH/Telnet）
       openDeviceEditor(id);
+    }
+
+    function showDeviceDetail(id) {
+      const d = devices.find(x => x.id === id);
+      if (!d) return;
+      currentDetailDevice = d;
+      const title = document.getElementById('detail-modal-title');
+      const content = document.getElementById('detail-content');
+      title.textContent = d.remark || d.name || '设备详情';
+      const facts = d.facts || {};
+      const typeMap = {layer2_switch:'二层交换机',layer3_switch:'三层交换机',router:'路由器',firewall:'防火墙',unknown:'未识别'};
+      content.innerHTML = `
+        <table style="width:100%;font-size:13px;border-collapse:collapse;">
+          <tr><td style="color:#64748b;padding:4px 8px;width:80px;">名称</td><td>${d.remark || d.name || '-'}</td></tr>
+          <tr><td style="color:#64748b;padding:4px 8px;">IP</td><td>${d.ip || '-'}</td></tr>
+          <tr><td style="color:#64748b;padding:4px 8px;">端口</td><td>${d.port || '-'}</td></tr>
+          <tr><td style="color:#64748b;padding:4px 8px;">连接</td><td>${d.conn_type || 'ssh'}</td></tr>
+          <tr><td style="color:#64748b;padding:4px 8px;">类型</td><td>${typeMap[d.device_type] || d.device_type || '未识别'}</td></tr>
+          <tr><td style="color:#64748b;padding:4px 8px;">厂商</td><td>${d.vendor || 'auto'}</td></tr>
+          <tr><td style="color:#64748b;padding:4px 8px;">主机名</td><td>${facts.hostname || '-'}</td></tr>
+          <tr><td style="color:#64748b;padding:4px 8px;">型号</td><td>${facts.model || facts.device_model || '-'}</td></tr>
+          <tr><td style="color:#64748b;padding:4px 8px;">版本</td><td>${facts.os_version || facts.version || '-'}</td></tr>
+          <tr><td style="color:#64748b;padding:4px 8px;">序列号</td><td>${facts.serial || '-'}</td></tr>
+          <tr><td style="color:#64748b;padding:4px 8px;">采集时间</td><td>${facts.last_collected ? new Date(facts.last_collected).toLocaleString() : '-'}</td></tr>
+        </table>
+      `;
+      openModal('modal-device-detail');
     }
 
     // ===== 配置中心（拓扑节点点击弹出） =====
@@ -2081,7 +2178,7 @@
     async function refreshAllFacts() {
       if(!devices.length){addMsg('system','暂无设备');return;}
       addMsg('system','⏳ 采集中...');
-      for(const d of devices){if(d.name||d.remark) await collectDeviceFacts(d.name||d.remark);}
+      for(const d of devices){if(d.remark||d.ip) await collectDeviceFacts(d.remark||d.ip);}
       addMsg('system','✅ 采集完成');
     }
 
@@ -2120,7 +2217,7 @@
 
     async function deleteCurrentDevice() {
       if (!confirm('确认删除该设备？')) return;
-      const r = await fetch('/api/device/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:editingDeviceId})});
+      const r = await fetch('/api/device/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:editingDeviceId})});
       const res = await r.json();
       if (res.success) {
         closeModal('modal-device');
@@ -2203,26 +2300,23 @@
         const socket = io();
         socket.on('diagnosis_step', function(data) {
           const cls = data.status === 'PASS' ? 'msg-success' : data.status === 'FAIL' ? 'msg-error' : 'msg-system';
-          appendMsg(`🔍 ${data.step}: ${data.message}`, cls);
+          addMsg('system', `🔍 ${data.step}: ${data.message}`);
         });
         socket.on('progress', function(data) {
-          appendMsg(`⏳ 进度: ${data.current}/${data.total} (${data.percent}%) ${data.message}`, 'msg-system');
+          addMsg('system', `⏳ 进度: ${data.current}/${data.total} (${data.percent}%) ${data.message}`);
         });
         socket.on('command_result', function(data) {
-          const cls = data.success ? 'msg-success' : 'msg-error';
-          appendMsg(`📡 ${data.device} → ${data.command} (${data.duration}s)`, cls);
+          addMsg(data.success ? 'success' : 'error', `📡 ${data.device} → ${data.command} (${data.duration}s)`);
         });
         socket.on('diagnosis_complete', function(data) {
-          const cls = data.success ? 'msg-success' : 'msg-error';
-          appendMsg(`✅ 诊断完成: ${data.root_cause || '正常'}`, cls);
+          addMsg(data.success ? 'success' : 'error', `✅ 诊断完成: ${data.root_cause || '正常'}`);
           if (data.suggestions && data.suggestions.length) {
-            data.suggestions.forEach(s => appendMsg(`💡 ${s}`, 'msg-system'));
+            data.suggestions.forEach(s => addMsg('system', `💡 ${s}`));
           }
         });
         socket.on('notification', function(data) {
           const icons = {info: 'ℹ️', warning: '⚠️', error: '❌'};
-          const cls = data.level === 'error' ? 'msg-error' : data.level === 'warning' ? 'msg-system' : 'msg-success';
-          appendMsg(`${icons[data.level]||'📢'} ${data.message}`, cls);
+          addMsg(data.level === 'error' ? 'error' : 'system', `${icons[data.level]||'📢'} ${data.message}`);
         });
       } catch(e) { /* Socket.IO not available, fallback to polling */ }
     })();

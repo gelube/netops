@@ -6,9 +6,8 @@
 import difflib
 import re
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 from pathlib import Path
-import json
 
 
 class ConfigDiff:
