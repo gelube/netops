@@ -2145,7 +2145,7 @@
           <input id="cfg-prompt-input" type="text" placeholder="${placeholder}" style="flex:1;background:#1e293b;border:1px solid #334155;color:#e5e7eb;padding:6px 10px;border-radius:4px;font-size:12px;outline:none;" onkeydown="if(event.key==='Enter')document.getElementById('cfg-prompt-ok').click()" autofocus />
           <button id="cfg-prompt-ok" class="btn" style="background:#1d4ed8;color:#fff;padding:6px 14px;white-space:nowrap;" onclick="
             const v=document.getElementById('cfg-prompt-input').value.trim();
-            if(v){document.getElementById('cfg-prompt-box').innerHTML='';quickQuery('${dev}','${action} '+v+' on ${dev}');}
+            if(v){document.getElementById('cfg-prompt-box').innerHTML='';sendChatWithPreview('${action} '+v,{selected_device:'${dev}'});}
           ">执行</button>
           <button class="btn" style="padding:6px 10px;" onclick="document.getElementById('cfg-prompt-box').innerHTML=''">取消</button>
         </div>`;
@@ -2157,9 +2157,27 @@
       if(el){el.style.display='block';el.className='config-result';el.textContent='⏳ 查询中...';}
       addMsg('user', msg);
       const d = devices.find(x => x.id === selectedId);
+      const devName = d?.remark || d?.name || device;
       try {
-        const r = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,context:{selected_device:d?.name||d?.remark}})});
-        const res = await r.json();
+        // 先尝试快速模板（秒回）
+        let res = null;
+        try {
+          const qr = await fetch('/api/quick-config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device:devName,mode:'preview',message:msg})});
+          const qd = await qr.json();
+          if(qd.matched && qd.results) {
+            const parts = [];
+            for(const r of (qd.results||[])) {
+              if(r.success && r.results) { for(const x of r.results) { parts.push(`命令: ${x.command}\n${x.output?.slice(0,2000)||''}`); } }
+              else if(!r.success) { parts.push(`❌ ${r.error||'失败'}`); }
+            }
+            res = {success:true, response: parts.join('\n---\n')||'查询完成', _fast:true};
+          }
+        } catch(e) { /* fallback to LLM */ }
+        // 快速模板没匹配到，走LLM
+        if(!res) {
+          const r = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,context:{selected_device:devName}})});
+          res = await r.json();
+        }
         if(el){el.className=res.success?'config-result success':'config-result error';el.textContent=res.response||res.message||'';}
         addMsg('ai',(res.success?'✅ ':'❌ ')+(res.response||res.message||''));
       } catch(e) { if(el){el.className='config-result error';el.textContent='失败';} }

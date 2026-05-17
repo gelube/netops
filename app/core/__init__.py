@@ -11,9 +11,11 @@ from app.core.device import (
 )
 from app.core.vendor import VendorIdentifier as VendorIdentifier
 
+
 # Lazy imports to avoid circular dependency
 def __getattr__(name):
     if name in ("TopologyDiscovery", "DiscoveryResult"):
         from app.core.discovery import TopologyDiscovery, DiscoveryResult
+
         return {"TopologyDiscovery": TopologyDiscovery, "DiscoveryResult": DiscoveryResult}[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

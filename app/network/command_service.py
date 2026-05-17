@@ -14,6 +14,7 @@
     svc = CommandService()
     result = svc.execute(device_info, commands, user_id="admin")
 """
+
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -23,6 +24,7 @@ from app.audit import AuditLogger, AuditEntry
 
 try:
     from netmiko import ConnectHandler
+
     NETMIKO_AVAILABLE = True
 except ImportError:
     NETMIKO_AVAILABLE = False
@@ -31,39 +33,41 @@ except ImportError:
 @dataclass
 class DeviceInfo:
     """设备信息（统一格式，屏蔽来源差异）"""
+
     name: str
     ip: str
-    vendor: str = "huawei"          # 业务厂商: huawei/h3c/cisco/juniper
-    netmiko_type: str = ""          # netmiko 设备类型
+    vendor: str = "huawei"  # 业务厂商: huawei/h3c/cisco/juniper
+    netmiko_type: str = ""  # netmiko 设备类型
     username: str = ""
     password: str = ""
     port: int = 22
-    conn_type: str = "ssh"         # ssh / telnet
+    conn_type: str = "ssh"  # ssh / telnet
 
     def __post_init__(self):
         if not self.netmiko_type:
             _map = {
-                'huawei': 'huawei',
-                'h3c': 'huawei',
-                'cisco': 'cisco_ios',
-                'juniper': 'juniper_junos',
+                "huawei": "huawei",
+                "h3c": "huawei",
+                "cisco": "cisco_ios",
+                "juniper": "juniper_junos",
             }
-            self.netmiko_type = _map.get(self.vendor, 'huawei')
+            self.netmiko_type = _map.get(self.vendor, "huawei")
             # telnet免凭证时用generic_termserver_telnet
-            if self.conn_type == 'telnet' and not self.username:
-                self.netmiko_type = 'generic_termserver_telnet'
+            if self.conn_type == "telnet" and not self.username:
+                self.netmiko_type = "generic_termserver_telnet"
 
 
 @dataclass
 class CommandResult:
     """命令执行结果"""
+
     success: bool
     outputs: List[Dict[str, str]] = field(default_factory=list)  # [{"command": ..., "output": ...}]
     error: str = ""
     blocked_commands: List[str] = field(default_factory=list)
     backup_id: str = ""
-    source: str = ""       # "template" | "llm" | "manual"
-    risk_level: str = ""   # CommandGuard 判定的风险等级
+    source: str = ""  # "template" | "llm" | "manual"
+    risk_level: str = ""  # CommandGuard 判定的风险等级
 
 
 class CommandService:
@@ -115,7 +119,7 @@ class CommandService:
                 guard = CommandGuard(vendor=device.netmiko_type)
                 guard_result = guard.check_commands(commands)
                 blocked = guard_result.blocked_commands
-                risk_level = guard_result.max_risk.label if hasattr(guard_result, 'max_risk') else "unknown"
+                risk_level = guard_result.max_risk.label if hasattr(guard_result, "max_risk") else "unknown"
 
                 if blocked:
                     audit_entry.result = "blocked"
@@ -136,6 +140,7 @@ class CommandService:
             except Exception as guard_err:
                 # CommandGuard 不可用时仅记录，不阻断查询命令
                 import logging
+
                 logging.getLogger(__name__).warning(f"CommandGuard 不可用: {guard_err}")
 
         # 2. dry_run 模式
@@ -191,7 +196,7 @@ class CommandService:
         conn = DeviceConnection(conn_info)
         try:
             # telnet免凭证设备需要特殊连接处理
-            if device.conn_type == 'telnet' and not device.username:
+            if device.conn_type == "telnet" and not device.username:
                 conn = self._telnet_connect(device)
             else:
                 conn.connect()
@@ -199,7 +204,7 @@ class CommandService:
             for cmd in commands:
                 try:
                     # telnet免凭证用原始通道
-                    if device.conn_type == 'telnet' and not device.username:
+                    if device.conn_type == "telnet" and not device.username:
                         output = self._telnet_execute(conn, cmd)
                     else:
                         output = conn.execute_command(cmd)
@@ -220,23 +225,24 @@ class CommandService:
 
         conn_info = ConnectionInfo(
             ip=device.ip,
-            username='',
-            password='',
+            username="",
+            password="",
             port=device.port,
-            device_type='generic_termserver_telnet',
+            device_type="generic_termserver_telnet",
         )
         conn = DeviceConnection(conn_info)
         conn.connection = ConnectHandler(
-            device_type='generic_termserver_telnet',
+            device_type="generic_termserver_telnet",
             host=device.ip,
             port=device.port,
-            username='',
-            password='',
+            username="",
+            password="",
             timeout=30,
         )
         # 发 Ctrl+C 中断 auto-config
         import time
-        conn.connection.write_channel('\x03')
+
+        conn.connection.write_channel("\x03")
         time.sleep(1)
         _ = conn.connection.read_channel()
         return conn
@@ -244,29 +250,32 @@ class CommandService:
     def _telnet_execute(self, conn, cmd: str) -> str:
         """Telnet免凭证执行命令"""
         import time
-        conn.connection.write_channel(cmd + '\n')
+
+        conn.connection.write_channel(cmd + "\n")
         time.sleep(2)
         output = conn.connection.read_channel()
         # 去掉回显
-        lines = output.split('\n')
+        lines = output.split("\n")
         filtered = []
         for line in lines:
             stripped = line.strip()
             if stripped and stripped != cmd:
                 filtered.append(line)
-        return '\n'.join(filtered)
+        return "\n".join(filtered)
 
     def _backup_before_execute(self, device: DeviceInfo, commands: List[str], user_id: str):
         """修改前自动备份当前配置"""
         try:
             from app.config_backup import get_backup_manager
+
             # 读取当前配置 — 复用_ssh_execute的telnet支持
-            if device.conn_type == 'telnet' and not device.username:
+            if device.conn_type == "telnet" and not device.username:
                 config_cmd = "display current-configuration"
                 results = self._ssh_execute(device, [config_cmd])
-                current_config = results[0].get('output', '') if results else ''
+                current_config = results[0].get("output", "") if results else ""
             else:
                 from app.network.ssh import DeviceConnection, ConnectionInfo
+
                 conn_info = ConnectionInfo(
                     ip=device.ip,
                     username=device.username,
@@ -275,9 +284,9 @@ class CommandService:
                     device_type=device.netmiko_type,
                 )
                 with DeviceConnection(conn_info) as conn:
-                    if device.netmiko_type in ('huawei', 'huawei_vrpv8', 'hp_comware'):
+                    if device.netmiko_type in ("huawei", "huawei_vrpv8", "hp_comware"):
                         current_config = conn.execute_command("display current-configuration")
-                    elif device.netmiko_type == 'juniper_junos':
+                    elif device.netmiko_type == "juniper_junos":
                         current_config = conn.execute_command("show configuration | display set")
                     else:
                         current_config = conn.execute_command("show running-config")
@@ -291,6 +300,7 @@ class CommandService:
                 return backup.backup_path
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(f"自动备份失败: {e}")
             return None
 
@@ -299,11 +309,11 @@ class CommandService:
         """从设备字典（devices.json 格式）创建 DeviceInfo"""
         creds = credentials or {}
         return DeviceInfo(
-            name=device_dict.get('name', '') or device_dict.get('remark', ''),
-            ip=device_dict.get('ip', ''),
-            vendor=device_dict.get('vendor', 'huawei'),
-            username=creds.get('username', device_dict.get('username', '')),
-            password=creds.get('password', device_dict.get('password', '')),
-            port=device_dict.get('port', 22),
-            conn_type=device_dict.get('conn_type', 'ssh'),
+            name=device_dict.get("name", "") or device_dict.get("remark", ""),
+            ip=device_dict.get("ip", ""),
+            vendor=device_dict.get("vendor", "huawei"),
+            username=creds.get("username", device_dict.get("username", "")),
+            password=creds.get("password", device_dict.get("password", "")),
+            port=device_dict.get("port", 22),
+            conn_type=device_dict.get("conn_type", "ssh"),
         )

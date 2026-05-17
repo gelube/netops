@@ -5,6 +5,7 @@
 
 常见配置操作用模板生成（100%可靠），复杂场景才走LLM。
 """
+
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from app.logger import get_logger
@@ -15,12 +16,13 @@ log = get_logger(__name__)
 @dataclass
 class CommandTemplate:
     """命令模板"""
-    name: str                # 模板名称
-    intent_type: str         # 对应意图类型
-    vendor: str              # 厂商 (huawei/cisco/h3c/juniper 等, "common" 表示通用)
-    description: str         # 模板描述
-    param_keys: List[str]    # 需要的参数键名
-    generate: callable       # 生成函数 → List[str]
+
+    name: str  # 模板名称
+    intent_type: str  # 对应意图类型
+    vendor: str  # 厂商 (huawei/cisco/h3c/juniper 等, "common" 表示通用)
+    description: str  # 模板描述
+    param_keys: List[str]  # 需要的参数键名
+    generate: callable  # 生成函数 → List[str]
 
 
 def _mask_to_cidr(mask: str) -> str:
@@ -37,14 +39,14 @@ def _mask_to_cidr(mask: str) -> str:
         return mask
     # 点分十进制 → CIDR
     try:
-        parts = mask.split('.')
+        parts = mask.split(".")
         if len(parts) == 4:
-            binary = ''.join(format(int(p), '08b') for p in parts)
-            return str(binary.count('1'))
+            binary = "".join(format(int(p), "08b") for p in parts)
+            return str(binary.count("1"))
     except Exception as e:
         log.debug("mask转换失败", mask=mask, error=str(e))
         pass
-    return '24'  # 默认 /24
+    return "24"  # 默认 /24
 
 
 def _expand_interfaces(iface_str: str, vendor: str, context: Dict[str, Any] = None) -> Tuple[str, List[str]]:
@@ -57,45 +59,45 @@ def _expand_interfaces(iface_str: str, vendor: str, context: Dict[str, Any] = No
     context参数可传入 {"interface_prefix": "XGE1/0/", "slot": "1"} 等设备特定信息
     """
     # 已有完整接口名
-    if any(iface_str.startswith(p) for p in ('GE', 'Gigabit', 'XGE', '10GE', 'Eth', 'Loop', 'Vlan', 'Port', 'Bridge')):
+    if any(iface_str.startswith(p) for p in ("GE", "Gigabit", "XGE", "10GE", "Eth", "Loop", "Vlan", "Port", "Bridge")):
         return iface_str, [iface_str]
 
     # 纯数字范围
-    parts = iface_str.split('-')
+    parts = iface_str.split("-")
     if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
         start, end = int(parts[0]), int(parts[1])
         if start > end:
             start, end = end, start
 
-        if vendor in ('huawei', 'huawei_vrpv8'):
+        if vendor in ("huawei", "huawei_vrpv8"):
             iface_list = [f"GE0/0/{i}" for i in range(start, end + 1)]
             if len(iface_list) > 1:
                 return f"GE0/0/{start} to GE0/0/{end}", iface_list
             return iface_list[0], iface_list
-        elif vendor in ('hp_comware', 'h3c'):
+        elif vendor in ("hp_comware", "h3c"):
             iface_list = [f"GigabitEthernet1/0/{i}" for i in range(start, end + 1)]
             if len(iface_list) > 1:
                 return f"GigabitEthernet1/0/{start} to GigabitEthernet1/0/{end}", iface_list
             return iface_list[0], iface_list
-        elif vendor in ('cisco_ios', 'cisco_nxos', 'ruijie_os', 'arista_eos'):
+        elif vendor in ("cisco_ios", "cisco_nxos", "ruijie_os", "arista_eos"):
             iface_list = [f"GigabitEthernet0/{i}" for i in range(start, end + 1)]
             if len(iface_list) > 1:
                 return f"GigabitEthernet0/{start} - {end}", iface_list
             return iface_list[0], iface_list
-        elif vendor == 'juniper_junos':
+        elif vendor == "juniper_junos":
             # Juniper用set命令，不需要range语法
             return iface_str, [f"ge-0/0/{i}" for i in range(start, end + 1)]
 
     # 单个接口号
     if iface_str.isdigit():
         port = int(iface_str)
-        if vendor in ('huawei', 'huawei_vrpv8'):
+        if vendor in ("huawei", "huawei_vrpv8"):
             name = f"GE0/0/{port}"
-        elif vendor in ('hp_comware', 'h3c'):
+        elif vendor in ("hp_comware", "h3c"):
             name = f"GigabitEthernet1/0/{port}"
-        elif vendor in ('cisco_ios', 'cisco_nxos', 'ruijie_os', 'arista_eos'):
+        elif vendor in ("cisco_ios", "cisco_nxos", "ruijie_os", "arista_eos"):
             name = f"GigabitEthernet0/{port}"
-        elif vendor == 'juniper_junos':
+        elif vendor == "juniper_junos":
             name = f"ge-0/0/{port}"
         else:
             name = f"GigabitEthernet0/{port}"
@@ -165,6 +167,7 @@ HUAWEI_TEMPLATES = [
     ),
 ]
 
+
 def _huawei_vlan_access(params: Dict[str, Any]) -> List[str]:
     iface_str = str(params.get("interfaces", "1"))
     if isinstance(params.get("interfaces"), list):
@@ -180,6 +183,7 @@ def _huawei_vlan_access(params: Dict[str, Any]) -> List[str]:
     cmds.append(f"port default vlan {vlan_id}")
     cmds.append("quit")
     return cmds
+
 
 def _huawei_vlan_trunk(params: Dict[str, Any]) -> List[str]:
     iface_str = str(params.get("interfaces", "1"))
@@ -264,6 +268,7 @@ CISCO_TEMPLATES = [
     ),
 ]
 
+
 def _cisco_vlan_access(params: Dict[str, Any]) -> List[str]:
     iface_str = str(params.get("interfaces", "1"))
     if isinstance(params.get("interfaces"), list):
@@ -278,6 +283,7 @@ def _cisco_vlan_access(params: Dict[str, Any]) -> List[str]:
     cmds.append(f"switchport access vlan {vlan_id}")
     cmds.append("end")
     return cmds
+
 
 def _cisco_vlan_trunk(params: Dict[str, Any]) -> List[str]:
     iface_str = str(params.get("interfaces", "1"))
@@ -356,6 +362,7 @@ H3C_TEMPLATES = [
     ),
 ]
 
+
 def _h3c_vlan_access(params: Dict[str, Any]) -> List[str]:
     iface_str = str(params.get("interfaces", "1"))
     if isinstance(params.get("interfaces"), list):
@@ -370,6 +377,7 @@ def _h3c_vlan_access(params: Dict[str, Any]) -> List[str]:
     cmds.append(f"port access vlan {vlan_id}")
     cmds.append("quit")
     return cmds
+
 
 def _h3c_vlan_trunk(params: Dict[str, Any]) -> List[str]:
     iface_str = str(params.get("interfaces", "1"))
@@ -428,6 +436,7 @@ JUNIPER_TEMPLATES = [
     ),
 ]
 
+
 def _juniper_vlan_access(params: Dict[str, Any]) -> List[str]:
     iface_str = str(params.get("interfaces", "1"))
     if isinstance(params.get("interfaces"), list):
@@ -451,6 +460,7 @@ def _juniper_vlan_access(params: Dict[str, Any]) -> List[str]:
 # 按厂商分组的模板索引
 _TEMPLATES_BY_VENDOR_INTENT: Dict[str, Dict[str, List[CommandTemplate]]] = {}
 
+
 def _build_index():
     """构建模板索引"""
     all_templates = HUAWEI_TEMPLATES + CISCO_TEMPLATES + H3C_TEMPLATES + JUNIPER_TEMPLATES
@@ -461,6 +471,7 @@ def _build_index():
         if t.intent_type not in _TEMPLATES_BY_VENDOR_INTENT[key]:
             _TEMPLATES_BY_VENDOR_INTENT[key][t.intent_type] = []
         _TEMPLATES_BY_VENDOR_INTENT[key][t.intent_type].append(t)
+
 
 _build_index()
 
@@ -477,8 +488,8 @@ class TemplateMatcher:
         "cisco_nxos": "cisco_ios",
         "cisco_xr": "cisco_ios",
         "juniper": "juniper_junos",
-        "ruijie": "cisco_ios",        # 锐捷类似思科
-        "arista": "cisco_ios",         # Arista类似思科
+        "ruijie": "cisco_ios",  # 锐捷类似思科
+        "arista": "cisco_ios",  # Arista类似思科
     }
 
     @classmethod
@@ -577,11 +588,13 @@ class TemplateMatcher:
                 continue
             for itype, templates in intents.items():
                 for t in templates:
-                    result.append({
-                        "name": t.name,
-                        "vendor": t.vendor,
-                        "intent_type": t.intent_type,
-                        "description": t.description,
-                        "param_keys": t.param_keys,
-                    })
+                    result.append(
+                        {
+                            "name": t.name,
+                            "vendor": t.vendor,
+                            "intent_type": t.intent_type,
+                            "description": t.description,
+                            "param_keys": t.param_keys,
+                        }
+                    )
         return result

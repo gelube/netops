@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """LLM 配置模块"""
+
 import os
 import json
 from typing import List, Optional
@@ -14,20 +15,21 @@ log = get_logger(__name__)
 # Fernet 加密（与 credentials.py 共享密钥）
 try:
     from cryptography.fernet import Fernet
+
     _HAS_CRYPTO = True
 except ImportError:
     _HAS_CRYPTO = False
 
 
-def _get_fernet() -> Optional['Fernet']:
+def _get_fernet() -> Optional["Fernet"]:
     """获取 Fernet 实例（密钥与 credentials.py 共享 ~/.netops/fernet.key）"""
     if not _HAS_CRYPTO:
         return None
-    key_path = os.path.join(os.path.expanduser('~'), '.netops', 'fernet.key')
+    key_path = os.path.join(os.path.expanduser("~"), ".netops", "fernet.key")
     if not os.path.exists(key_path):
         return None
     try:
-        with open(key_path, 'rb') as f:
+        with open(key_path, "rb") as f:
             key = f.read().strip()
         return Fernet(key)
     except Exception:
@@ -37,22 +39,22 @@ def _get_fernet() -> Optional['Fernet']:
 def _encrypt_api_key(api_key: str) -> str:
     """加密 API Key，失败时返回原文并打印警告"""
     if not api_key:
-        return ''
+        return ""
     f = _get_fernet()
     if f is None:
-        log.info('[WARN] Fernet 不可用，API Key 将明文存储')
+        log.info("[WARN] Fernet 不可用，API Key 将明文存储")
         return api_key
     try:
         return f.encrypt(api_key.encode()).decode()
     except Exception:
-        log.error('[WARN] API Key 加密失败，将明文存储')
+        log.error("[WARN] API Key 加密失败，将明文存储")
         return api_key
 
 
 def _decrypt_api_key(encrypted: str) -> str:
     """解密 API Key，失败时返回原文（可能是明文或损坏的密文）"""
     if not encrypted:
-        return ''
+        return ""
     f = _get_fernet()
     if f is None:
         return encrypted  # 无 Fernet，当明文处理
@@ -65,6 +67,7 @@ def _decrypt_api_key(encrypted: str) -> str:
 
 class ProviderType(str, Enum):
     """Provider 类型"""
+
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     ALIYUN = "aliyun"
@@ -73,6 +76,7 @@ class ProviderType(str, Enum):
 
 class LLMConfig(BaseModel):
     """LLM 配置"""
+
     provider: str = "openai"
     endpoint: str = "https://api.openai.com/v1"
     api_key: str = ""
@@ -94,8 +98,9 @@ class LLMConfig(BaseModel):
         }
 
         import json
+
         try:
-            with open(config_path, 'w', encoding='utf-8') as f:
+            with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, indent=2, ensure_ascii=False)
             log.info(f"LLM config saved to: {config_path}")
         except Exception as e:
@@ -113,7 +118,7 @@ class LLMConfig(BaseModel):
 
         if os.path.exists(config_path):
             try:
-                with open(config_path, 'r', encoding='utf-8') as f:
+                with open(config_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     return cls(
                         provider=data.get("provider", "openai"),
@@ -142,6 +147,7 @@ class LLMClient:
         if self.config.provider == "anthropic":
             try:
                 import anthropic
+
                 kwargs = {}
                 if self.config.api_key:
                     kwargs["api_key"] = self.config.api_key
@@ -152,12 +158,10 @@ class LLMClient:
             # OpenAI 格式（兼容 OpenAI、阿里云、Ollama 等）
             try:
                 from openai import OpenAI
+
                 # 免凭证（Ollama等本地部署）：api_key不能传空字符串，用占位符
                 api_key = self.config.api_key or "sk-no-key-required"
-                self._client = OpenAI(
-                    api_key=api_key,
-                    base_url=self.config.endpoint
-                )
+                self._client = OpenAI(api_key=api_key, base_url=self.config.endpoint)
             except ImportError:
                 raise ImportError("Please install openai: pip install openai")
 
@@ -178,18 +182,15 @@ class LLMClient:
                     max_tokens=1024,
                     system=system_prompt,
                     messages=[{"role": "user", "content": user_message}],
-                    timeout=timeout
+                    timeout=timeout,
                 )
                 return response.content[0].text
             else:
                 # 复用 _get_client() 返回的 OpenAI 客户端（已内置连接池），不再每次新建 httpx.Client
                 response = client.chat.completions.create(
                     model=self.config.model or "gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message}
-                    ],
-                    timeout=timeout
+                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}],
+                    timeout=timeout,
                 )
                 return response.choices[0].message.content
         except Exception as e:
@@ -197,8 +198,7 @@ class LLMClient:
             log.error(f"LLM 调用失败（可能超时）: {e}")
             return None
 
-    def chat(self, messages: list, tools: list = None, temperature: float = 0.7,
-             timeout: int = 30) -> dict:
+    def chat(self, messages: list, tools: list = None, temperature: float = 0.7, timeout: int = 30) -> dict:
         """
         完整对话接口 — 支持 function calling / tool use
 
@@ -240,11 +240,13 @@ class LLMClient:
                     for t in tools:
                         if t.get("type") == "function":
                             func = t["function"]
-                            claude_tools.append({
-                                "name": func["name"],
-                                "description": func.get("description", ""),
-                                "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
-                            })
+                            claude_tools.append(
+                                {
+                                    "name": func["name"],
+                                    "description": func.get("description", ""),
+                                    "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
+                                }
+                            )
                     if claude_tools:
                         kwargs["tools"] = claude_tools
 
@@ -257,14 +259,16 @@ class LLMClient:
                     if block.type == "text":
                         text_parts.append(block.text)
                     elif block.type == "tool_use":
-                        tool_calls.append({
-                            "id": block.id,
-                            "type": "function",
-                            "function": {
-                                "name": block.name,
-                                "arguments": json.dumps(block.input),
+                        tool_calls.append(
+                            {
+                                "id": block.id,
+                                "type": "function",
+                                "function": {
+                                    "name": block.name,
+                                    "arguments": json.dumps(block.input),
+                                },
                             }
-                        })
+                        )
 
                 result["content"] = "\n".join(text_parts)
                 result["tool_calls"] = tool_calls if tool_calls else None
@@ -296,7 +300,7 @@ class LLMClient:
                             "function": {
                                 "name": tc.function.name,
                                 "arguments": tc.function.arguments,
-                            }
+                            },
                         }
                         for tc in choice.message.tool_calls
                     ]
@@ -311,9 +315,9 @@ class LLMClient:
         """获取可用模型列表"""
         try:
             client = self._get_client()
-            if hasattr(client, 'models'):
+            if hasattr(client, "models"):
                 models = client.models.list()
-                return [m.id for m in models.data] if hasattr(models, 'data') else []
+                return [m.id for m in models.data] if hasattr(models, "data") else []
             return []
         except Exception as e:
             log.error(f"Failed to list models: {e}")

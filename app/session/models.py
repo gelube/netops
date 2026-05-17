@@ -3,6 +3,7 @@
 """
 会话数据模型
 """
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -11,6 +12,7 @@ from enum import Enum
 
 class TurnRole(Enum):
     """对话角色"""
+
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
@@ -19,6 +21,7 @@ class TurnRole(Enum):
 @dataclass
 class ConversationTurn:
     """单轮对话"""
+
     id: str
     role: TurnRole
     content: str
@@ -55,6 +58,7 @@ class ConversationTurn:
 @dataclass
 class Session:
     """会话"""
+
     id: str
     user_id: str
     created_at: datetime = field(default_factory=datetime.now)

@@ -8,6 +8,7 @@
 2. 命令语法校验（厂商规则）
 3. 自动备份+回滚机制
 """
+
 import re
 from typing import List
 from dataclasses import dataclass, field
@@ -20,11 +21,12 @@ log = get_logger(__name__)
 
 class RiskLevel(Enum):
     """风险等级"""
-    SAFE = 0           # 安全（只读查询）
-    LOW = 1            # 低风险（常规配置）
-    MEDIUM = 2         # 中风险（修改路由/ACL/接口）
-    HIGH = 3           # 高风险（删除/重置/关机）
-    CRITICAL = 4       # 极高风险（擦除配置/重启设备）
+
+    SAFE = 0  # 安全（只读查询）
+    LOW = 1  # 低风险（常规配置）
+    MEDIUM = 2  # 中风险（修改路由/ACL/接口）
+    HIGH = 3  # 高风险（删除/重置/关机）
+    CRITICAL = 4  # 极高风险（擦除配置/重启设备）
 
     @property
     def label(self) -> str:
@@ -36,6 +38,7 @@ class RiskLevel(Enum):
 @dataclass
 class CommandCheckResult:
     """命令检查结果"""
+
     command: str
     risk_level: RiskLevel
     is_allowed: bool = True
@@ -46,6 +49,7 @@ class CommandCheckResult:
 @dataclass
 class GuardResult:
     """完整检查结果"""
+
     is_safe: bool = True
     results: List[CommandCheckResult] = field(default_factory=list)
     blocked_commands: List[str] = field(default_factory=list)
@@ -59,57 +63,57 @@ class CommandGuard:
 
     # 极高风险命令 → 直接拦截
     CRITICAL_PATTERNS = [
-        r'\b(erase|delete)\s+(flash|nvram|startup-config|running-config)\b',
-        r'\b(format)\s+(flash|slot)\b',
-        r'\b(factory-reset)\b',
-        r'\b(reset)\s+(saved-configuration|current-configuration)\b',
-        r'\b(write\s+erase|write\s+erase\b)',
-        r'\b(delete)\s+(vlan\.dat)\b',
-        r'\b(clear)\s+(startup-config|running-config|current-configuration)\b',
-        r'\b(reset)\s+(stack|cluster)\b',
-        r'\b(undo)\s+(startup-configuration|current-configuration)\b',
-        r'\b(erase)\s+(configuration)\b',
-        r'\b(startup\s+config)\s*(=|:)\s*$\b',
+        r"\b(erase|delete)\s+(flash|nvram|startup-config|running-config)\b",
+        r"\b(format)\s+(flash|slot)\b",
+        r"\b(factory-reset)\b",
+        r"\b(reset)\s+(saved-configuration|current-configuration)\b",
+        r"\b(write\s+erase|write\s+erase\b)",
+        r"\b(delete)\s+(vlan\.dat)\b",
+        r"\b(clear)\s+(startup-config|running-config|current-configuration)\b",
+        r"\b(reset)\s+(stack|cluster)\b",
+        r"\b(undo)\s+(startup-configuration|current-configuration)\b",
+        r"\b(erase)\s+(configuration)\b",
+        r"\b(startup\s+config)\s*(=|:)\s*$\b",
     ]
 
     # 高风险命令 → 允许但需额外确认
     HIGH_PATTERNS = [
-        r'\breload\b',
-        r'\breboot\b',
-        r'(?:^|\n)\s*shutdown\b',                    # 关接口（仅在行首或配置块内）
-        r'\binterface\s+\S+[\s\S]*?shutdown\b',  # 接口下 shutdown
-        r'\bno\s+(vlan|interface)\s+\d+',      # 删VLAN/接口
-        r'\bno\s+ip\s+route\b',                # 删路由
-        r'\bundo\s+(vlan|interface)\b',        # 华为删VLAN/接口
-        r'\bundo\s+ip\s+route-static\b',       # 华为删路由
-        r'\bundo\s+stp\s+enable\b',            # 关STP
-        r'\bno\s+spanning-tree\b',             # 关STP
-        r'\bport\s+link-type\s+trunk\b',       # 改trunk可能影响多VLAN
-        r'\bswitchport\s+mode\s+trunk\b',      # 同上
-        r'\bacl\s+\d+\s+rule\s+permit\s+ip\s+any\s+any\b',  # 全放行ACL
-        r'\baccess-list\s+\d+\s+permit\s+ip\s+any\s+any\b', # 同上
-        r'\bclear\s+(arp|mac|ip\s+route|ospf|bgp)\b',   # 清除表项
-        r'\breset\s+(ospf|bgp|stp|lldp)\b',    # 重置协议
-        r'\bundo\s+(ospf|bgp|isis)\s+\d*\b',  # 删除路由协议
-        r'\bno\s+(router\s+ospf|router\s+bgp)\b',  # 同上
+        r"\breload\b",
+        r"\breboot\b",
+        r"(?:^|\n)\s*shutdown\b",  # 关接口（仅在行首或配置块内）
+        r"\binterface\s+\S+[\s\S]*?shutdown\b",  # 接口下 shutdown
+        r"\bno\s+(vlan|interface)\s+\d+",  # 删VLAN/接口
+        r"\bno\s+ip\s+route\b",  # 删路由
+        r"\bundo\s+(vlan|interface)\b",  # 华为删VLAN/接口
+        r"\bundo\s+ip\s+route-static\b",  # 华为删路由
+        r"\bundo\s+stp\s+enable\b",  # 关STP
+        r"\bno\s+spanning-tree\b",  # 关STP
+        r"\bport\s+link-type\s+trunk\b",  # 改trunk可能影响多VLAN
+        r"\bswitchport\s+mode\s+trunk\b",  # 同上
+        r"\bacl\s+\d+\s+rule\s+permit\s+ip\s+any\s+any\b",  # 全放行ACL
+        r"\baccess-list\s+\d+\s+permit\s+ip\s+any\s+any\b",  # 同上
+        r"\bclear\s+(arp|mac|ip\s+route|ospf|bgp)\b",  # 清除表项
+        r"\breset\s+(ospf|bgp|stp|lldp)\b",  # 重置协议
+        r"\bundo\s+(ospf|bgp|isis)\s+\d*\b",  # 删除路由协议
+        r"\bno\s+(router\s+ospf|router\s+bgp)\b",  # 同上
     ]
 
     # 中风险命令 → 需要备份
     MEDIUM_PATTERNS = [
-        r'\b(ip\s+route-static|ip\s+route)\b',         # 静态路由
-        r'\b(ospf|bgp|isis)\b',                         # 动态路由协议
-        r'\b(acl|access-list)\s+\d+',                   # ACL规则
-        r'\b(vlan)\s+\d+\b',                            # VLAN操作
-        r'\b(port\s+default\s+vlan|switchport\s+access\s+vlan)\b',  # 接口VLAN
-        r'\b(port\s+link-type|switchport\s+mode)\b',    # 端口模式
-        r'\b(trunk|port\s+trunk)\b',                    # Trunk配置
-        r'\b(nat|static\s+nat|easy\s+ip)\b',            # NAT配置
+        r"\b(ip\s+route-static|ip\s+route)\b",  # 静态路由
+        r"\b(ospf|bgp|isis)\b",  # 动态路由协议
+        r"\b(acl|access-list)\s+\d+",  # ACL规则
+        r"\b(vlan)\s+\d+\b",  # VLAN操作
+        r"\b(port\s+default\s+vlan|switchport\s+access\s+vlan)\b",  # 接口VLAN
+        r"\b(port\s+link-type|switchport\s+mode)\b",  # 端口模式
+        r"\b(trunk|port\s+trunk)\b",  # Trunk配置
+        r"\b(nat|static\s+nat|easy\s+ip)\b",  # NAT配置
     ]
 
     # 安全命令（只读查询）
     SAFE_PATTERNS = [
-        r'^(show|display|get|ping|traceroute)\b',
-        r'^(show|display)\s+(version|running-config|current-config|ip|interface|vlan|arp|mac|route|lldp|cdp|ntp|clock|logging|acl|ospf|bgp|stp|environment|alarm|cpu|memory)\b',
+        r"^(show|display|get|ping|traceroute)\b",
+        r"^(show|display)\s+(version|running-config|current-config|ip|interface|vlan|arp|mac|route|lldp|cdp|ntp|clock|logging|acl|ospf|bgp|stp|environment|alarm|cpu|memory)\b",
     ]
 
     # 厂商特定的命令前缀
@@ -174,7 +178,7 @@ class CommandGuard:
                 continue
 
             # 检测退出配置模式
-            if cmd_stripped.lower() in ('quit', 'exit', 'end', 'return'):
+            if cmd_stripped.lower() in ("quit", "exit", "end", "return"):
                 in_config_mode = False
                 check = CommandCheckResult(
                     command=cmd_stripped,

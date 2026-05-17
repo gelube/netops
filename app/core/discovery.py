@@ -4,6 +4,7 @@
 拓扑发现模块 - 完善版
 支持 LLDP/CDP 自动发现
 """
+
 import asyncio
 from typing import Dict, Set, Optional
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ log = get_logger(__name__)
 @dataclass
 class DiscoveryResult:
     """发现结果"""
+
     success: bool
     message: str
     topology: Optional[Topology] = None
@@ -219,37 +221,42 @@ class TopologyDiscovery:
         """
         if format == "json":
             import json
-            return json.dumps({
-                "devices": [
-                    {
-                        "hostname": d.name,
-                        "ip": d.ip,
-                        "vendor": d.vendor.value,
-                        "model": d.model,
-                    }
-                    for d in self.topology.devices
-                ],
-                "links": [
-                    {
-                        "src": f"{link.source_device}/{link.source_interface}",
-                        "dst": f"{link.target_device}/{link.target_interface}",
-                        "type": link.port_type.value,
-                    }
-                    for link in self.topology.links
-                ],
-            }, indent=2, ensure_ascii=False)
+
+            return json.dumps(
+                {
+                    "devices": [
+                        {
+                            "hostname": d.name,
+                            "ip": d.ip,
+                            "vendor": d.vendor.value,
+                            "model": d.model,
+                        }
+                        for d in self.topology.devices
+                    ],
+                    "links": [
+                        {
+                            "src": f"{link.source_device}/{link.source_interface}",
+                            "dst": f"{link.target_device}/{link.target_interface}",
+                            "type": link.port_type.value,
+                        }
+                        for link in self.topology.links
+                    ],
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
 
         elif format == "mermaid":
             # Mermaid 流程图格式
             lines = ["graph TD"]
 
             for device in self.topology.devices:
-                lines.append(f"    {device.name.replace('-', '_')}[\"{device.name}<br/>{device.ip}\"]")
+                lines.append(f'    {device.name.replace("-", "_")}["{device.name}<br/>{device.ip}"]')
 
             for link in self.topology.links:
-                src = link.source_device.replace('-', '_')
-                dst = link.target_device.replace('-', '_')
-                lines.append(f"    {src} -- \"{link.source_interface}<->{link.target_interface}\" --> {dst}")
+                src = link.source_device.replace("-", "_")
+                dst = link.target_device.replace("-", "_")
+                lines.append(f'    {src} -- "{link.source_interface}<->{link.target_interface}" --> {dst}')
 
             return "\n".join(lines)
 
@@ -259,10 +266,12 @@ class TopologyDiscovery:
             lines.append("    rankdir=LR;")
 
             for device in self.topology.devices:
-                lines.append(f"    \"{device.name}\" [label=\"{device.name}\\n{device.ip}\"];")
+                lines.append(f'    "{device.name}" [label="{device.name}\\n{device.ip}"];')
 
             for link in self.topology.links:
-                lines.append(f"    \"{link.source_device}\" -> \"{link.target_device}\" [label=\"{link.source_interface}<->{link.target_interface}\"];")
+                lines.append(
+                    f'    "{link.source_device}" -> "{link.target_device}" [label="{link.source_interface}<->{link.target_interface}"];'
+                )
 
             lines.append("}")
             return "\n".join(lines)

@@ -1,6 +1,7 @@
 """
 设备数据模型定义
 """
+
 from enum import Enum
 from typing import Optional, List
 from pydantic import BaseModel, Field
@@ -8,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class Vendor(str, Enum):
     """网络设备厂商"""
+
     # 主流厂商
     HUAWEI = "huawei"
     H3C = "h3c"
@@ -35,6 +37,7 @@ class Vendor(str, Enum):
 
 class DeviceType(str, Enum):
     """设备类型"""
+
     ROUTER = "router"
     SWITCH_L3 = "switch_l3"
     SWITCH_L2 = "switch_l2"
@@ -49,6 +52,7 @@ class DeviceType(str, Enum):
 
 class PortType(str, Enum):
     """端口类型"""
+
     NORMAL = "normal"
     AGGREGATE = "aggregate"
     VRRP = "vrrp"
@@ -66,6 +70,7 @@ class PortType(str, Enum):
 
 class PortStatus(str, Enum):
     """端口状态"""
+
     UP = "up"
     DOWN = "down"
     UNKNOWN = "unknown"
@@ -73,6 +78,7 @@ class PortStatus(str, Enum):
 
 class Interface(BaseModel):
     """接口模型"""
+
     name: str
     ip: Optional[str] = None
     status: PortStatus = PortStatus.UNKNOWN
@@ -89,6 +95,7 @@ class Interface(BaseModel):
 
 class Device(BaseModel):
     """网络设备模型"""
+
     id: str = Field(default="")
     name: str = ""
     ip: str = ""
@@ -119,11 +126,11 @@ class Device(BaseModel):
         """获取主IP地址"""
         for iface in self.interfaces:
             if iface.ip and iface.port_type not in [PortType.LOOPBACK, PortType.VLAN_INTERFACE]:
-                return iface.ip.split('/')[0]
+                return iface.ip.split("/")[0]
         # 尝试获取第一个有效IP
         for iface in self.interfaces:
             if iface.ip:
-                return iface.ip.split('/')[0]
+                return iface.ip.split("/")[0]
         return self.ip
 
     @property
@@ -131,12 +138,13 @@ class Device(BaseModel):
         """获取Loopback地址"""
         for iface in self.interfaces:
             if iface.port_type == PortType.LOOPBACK and iface.ip:
-                return iface.ip.split('/')[0]
+                return iface.ip.split("/")[0]
         return ""
 
 
 class Link(BaseModel):
     """链路模型"""
+
     source_device: str  # 设备ID
     source_interface: str
     target_device: str
@@ -153,6 +161,7 @@ class Link(BaseModel):
 
 class Topology(BaseModel):
     """拓扑模型"""
+
     devices: List[Device] = Field(default_factory=list)
     links: List[Link] = Field(default_factory=list)
 
@@ -207,7 +216,8 @@ class Topology(BaseModel):
         self.devices.remove(device)
 
         # 删除与该设备关联的所有链路
-        self.links = [link for link in self.links
-                      if link.source_device != device_id and link.target_device != device_id]
+        self.links = [
+            link for link in self.links if link.source_device != device_id and link.target_device != device_id
+        ]
 
         return True

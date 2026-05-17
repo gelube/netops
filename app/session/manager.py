@@ -4,6 +4,7 @@
 会话管理器
 支持多用户、多会话、上下文保持
 """
+
 import json
 import os
 import uuid
@@ -76,10 +77,18 @@ class SessionManager:
 
         return None
 
-    def add_turn(self, user_id: str, role: TurnRole, content: str,
-                 intent_type: str = None, intent_params: dict = None,
-                 execution_success: bool = None, execution_data: dict = None,
-                 referenced_devices: List[str] = None, referenced_vlans: List[int] = None) -> ConversationTurn:
+    def add_turn(
+        self,
+        user_id: str,
+        role: TurnRole,
+        content: str,
+        intent_type: str = None,
+        intent_params: dict = None,
+        execution_success: bool = None,
+        execution_data: dict = None,
+        referenced_devices: List[str] = None,
+        referenced_vlans: List[int] = None,
+    ) -> ConversationTurn:
         """
         添加对话轮次
 
@@ -213,10 +222,7 @@ class SessionManager:
                     os.remove(session_file)
 
             # 清理用户映射
-            self.user_sessions = {
-                uid: sid for uid, sid in self.user_sessions.items()
-                if sid in self.sessions
-            }
+            self.user_sessions = {uid: sid for uid, sid in self.user_sessions.items() if sid in self.sessions}
 
     def get_session_stats(self) -> Dict[str, int]:
         """获取会话统计"""

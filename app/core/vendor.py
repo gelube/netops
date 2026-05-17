@@ -2,6 +2,7 @@
 厂商识别模块
 根据设备SNMP信息和命令输出自动识别厂商、型号、设备类型
 """
+
 import re
 from typing import Tuple
 from app.core.device import Vendor, DeviceType
@@ -186,19 +187,19 @@ class VendorIdentifier:
 
         # 匹配华为型号
         huawei_patterns = [
-            r'(S\d{4}[A-Z]?-\d+[A-Z]?)',  # S5720S-28P
-            r'(S\d{5}[A-Z]?)',              # S5735S
-            r'(AR\d{4})',                   # AR1220
-            r'(NE\d+)',                     # NE40E
-            r'(USG\d+)',                    # USG6000
+            r"(S\d{4}[A-Z]?-\d+[A-Z]?)",  # S5720S-28P
+            r"(S\d{5}[A-Z]?)",  # S5735S
+            r"(AR\d{4})",  # AR1220
+            r"(NE\d+)",  # NE40E
+            r"(USG\d+)",  # USG6000
         ]
 
         # 思科型号
         cisco_patterns = [
-            r'(C\d{4})',                    # C2960
-            r'([A-Z]\d{3})',               # 2960
-            r'(ASR\s*\d+)',                # ASR 1000
-            r'(ISR\s*\d+)',                # ISR 4000
+            r"(C\d{4})",  # C2960
+            r"([A-Z]\d{3})",  # 2960
+            r"(ASR\s*\d+)",  # ASR 1000
+            r"(ISR\s*\d+)",  # ISR 4000
         ]
 
         for pattern in huawei_patterns:
@@ -212,7 +213,7 @@ class VendorIdentifier:
                 return match.group(1)
 
         # 尝试提取第一个连续字母数字组合作为型号
-        match = re.search(r'([A-Za-z0-9]+(?:[A-Za-z0-9-]+)?)', sys_descr)
+        match = re.search(r"([A-Za-z0-9]+(?:[A-Za-z0-9-]+)?)", sys_descr)
         if match:
             return match.group(1)
 

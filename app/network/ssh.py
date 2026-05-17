@@ -2,6 +2,7 @@
 SSH连接模块
 使用Netmiko连接网络设备
 """
+
 import socket
 from typing import Optional, List
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 try:
     from netmiko import ConnectHandler
     from netmiko.exceptions import NetmikoTimeoutException, NetmikoAuthenticationException
+
     NETMIKO_AVAILABLE = True
 except ImportError:
     NETMIKO_AVAILABLE = False
@@ -25,6 +27,7 @@ log = get_logger(__name__)
 @dataclass
 class ConnectionInfo:
     """连接信息"""
+
     ip: str
     port: int = 22
     username: str = ""
@@ -77,13 +80,13 @@ class DeviceConnection:
 
         # 构建连接参数
         device_params = {
-            'device_type': device_type,
-            'host': self.conn_info.ip,
-            'port': self.conn_info.port,
-            'username': self.conn_info.username,
-            'password': self.conn_info.password,
-            'timeout': self.timeout,
-            'global_delay_factor': 0.5,
+            "device_type": device_type,
+            "host": self.conn_info.ip,
+            "port": self.conn_info.port,
+            "username": self.conn_info.username,
+            "password": self.conn_info.password,
+            "timeout": self.timeout,
+            "global_delay_factor": 0.5,
         }
 
         try:
@@ -113,26 +116,26 @@ class DeviceConnection:
     # prompt/输出特征 → netmiko device_type 映射（用于快速检测）
     # 注意：正则从具体到通用排列，先匹配的特殊模式优先
     PROMPT_VENDOR_MAP = [
-        (r'\S+@[\w-]+>', 'juniper_junos'),        # user@router> (最特殊)
-        (r'[<\[]\S+[>#\]]', 'huawei'),          # <SW-Core> or [SW-Core]
-        (r'\S+:\S+[>#]', 'hp_comware'),           # H3C: <SW-Core> or SW-Core#
-        (r'\S+#\s*$', 'cisco_ios'),               # SW-Core# (IOS/NXOS/锐捷共用，需版本输出区分)
-        (r'\S+>\s*$', 'cisco_ios'),               # SW-Core> (用户模式)
+        (r"\S+@[\w-]+>", "juniper_junos"),  # user@router> (最特殊)
+        (r"[<\[]\S+[>#\]]", "huawei"),  # <SW-Core> or [SW-Core]
+        (r"\S+:\S+[>#]", "hp_comware"),  # H3C: <SW-Core> or SW-Core#
+        (r"\S+#\s*$", "cisco_ios"),  # SW-Core# (IOS/NXOS/锐捷共用，需版本输出区分)
+        (r"\S+>\s*$", "cisco_ios"),  # SW-Core> (用户模式)
     ]
 
     # 版本输出关键词 → device_type 映射
     VERSION_KEYWORDS_MAP = {
-        'huawei': ['huawei', 'vrp', 'versal', r's\d{4}', r'ar\d{4}', r'ne\d', 'usg'],
-        'hp_comware': ['h3c', 'comware', '3com', r's\d{4}', 'msr'],
-        'cisco_ios': ['cisco', 'ios', r'c\d{4}'],
-        'cisco_nxos': ['nx-os', 'nexus', 'nxos'],
-        'cisco_xr': ['ios-xr', 'ios xr'],
-        'juniper_junos': ['juniper', 'junos'],
-        'ruijie_os': ['ruijie', 'rgos'],
-        'arista_eos': ['arista', 'eos'],
-        'huawei_vrpv8': ['cloudengine', r'ce\d{4}', 'vrpv8'],
-        'fortinet': ['fortigate', 'fortios'],
-        'paloalto_panos': ['paloalto', 'pan-os'],
+        "huawei": ["huawei", "vrp", "versal", r"s\d{4}", r"ar\d{4}", r"ne\d", "usg"],
+        "hp_comware": ["h3c", "comware", "3com", r"s\d{4}", "msr"],
+        "cisco_ios": ["cisco", "ios", r"c\d{4}"],
+        "cisco_nxos": ["nx-os", "nexus", "nxos"],
+        "cisco_xr": ["ios-xr", "ios xr"],
+        "juniper_junos": ["juniper", "junos"],
+        "ruijie_os": ["ruijie", "rgos"],
+        "arista_eos": ["arista", "eos"],
+        "huawei_vrpv8": ["cloudengine", r"ce\d{4}", "vrpv8"],
+        "fortinet": ["fortigate", "fortios"],
+        "paloalto_panos": ["paloalto", "pan-os"],
     }
 
     def _get_device_type(self) -> str:
@@ -143,6 +146,7 @@ class DeviceConnection:
         # 策略1：用 autodetect（netmiko内置，1次连接搞定）
         try:
             from netmiko import SSHDetect
+
             guesser = SSHDetect(
                 host=self.conn_info.ip,
                 port=self.conn_info.port,
@@ -165,7 +169,7 @@ class DeviceConnection:
         # 策略2：用cisco_ios连一次，读版本信息本地判断
         try:
             temp_conn = ConnectHandler(
-                device_type='cisco_ios',
+                device_type="cisco_ios",
                 host=self.conn_info.ip,
                 port=self.conn_info.port,
                 username=self.conn_info.username,
@@ -173,35 +177,36 @@ class DeviceConnection:
                 timeout=15,
             )
             # 读版本信息
-            prompt = temp_conn.find_prompt() or ''
+            prompt = temp_conn.find_prompt() or ""
             try:
-                version_output = temp_conn.send_command_timing('show version', delay_factor=1, timeout=10)
+                version_output = temp_conn.send_command_timing("show version", delay_factor=1, timeout=10)
             except Exception as e:
                 log.debug("读取版本信息失败", error=str(e))
-                version_output = ''
+                version_output = ""
 
             detected = self._detect_type_from_output(prompt, version_output)
-            if detected and detected != 'cisco_ios':
+            if detected and detected != "cisco_ios":
                 # 检测到不同类型，需要重连；但断开当前连接
                 temp_conn.disconnect()
                 return detected
             # cisco_ios 就是当前连接类型，复用
-            if detected == 'cisco_ios':
+            if detected == "cisco_ios":
                 self._autodetect_connection = temp_conn
-                self._autodetect_device_type = 'cisco_ios'
-                return 'cisco_ios'
+                self._autodetect_device_type = "cisco_ios"
+                return "cisco_ios"
             temp_conn.disconnect()
         except Exception as e:
             log.debug("策略2 cisco_ios探测失败，使用默认类型", error=str(e))
 
         # 默认cisco_ios
-        return 'cisco_ios'
+        return "cisco_ios"
 
     @classmethod
     def _detect_type_from_output(cls, prompt: str, version_output: str) -> str:
         """从提示符和版本输出推断netmiko device_type"""
         import re as _re
-        text = f'{prompt} {version_output}'.lower()
+
+        text = f"{prompt} {version_output}".lower()
 
         # 版本关键词匹配（优先）
         for dtype, keywords in cls.VERSION_KEYWORDS_MAP.items():
@@ -214,7 +219,7 @@ class DeviceConnection:
             if _re.search(pattern, prompt):
                 return dtype
 
-        return ''
+        return ""
 
     def _identify_vendor(self) -> Vendor:
         """识别厂商"""
@@ -231,11 +236,7 @@ class DeviceConnection:
         if not self.connection:
             raise Exception("未连接设备")
 
-        output = self.connection.send_command_timing(
-            command,
-            delay_factor=1,
-            timeout=timeout
-        )
+        output = self.connection.send_command_timing(command, delay_factor=1, timeout=timeout)
         return output
 
     def disconnect(self) -> None:
@@ -274,12 +275,12 @@ class DeviceConnection:
         import re
 
         # 华为
-        match = re.search(r'Huawei\s+(\S+)', output, re.IGNORECASE)
+        match = re.search(r"Huawei\s+(\S+)", output, re.IGNORECASE)
         if match:
             return match.group(1)
 
         # 思科
-        match = re.search(r'(\S+) uptime', output)
+        match = re.search(r"(\S+) uptime", output)
         if match:
             return match.group(1)
 
@@ -290,12 +291,12 @@ class DeviceConnection:
         import re
 
         # 华为: Ver V200R019C10SPH200
-        match = re.search(r'Ver(?:sion)?\s+([A-Z0-9]+)', output, re.IGNORECASE)
+        match = re.search(r"Ver(?:sion)?\s+([A-Z0-9]+)", output, re.IGNORECASE)
         if match:
             return match.group(1)
 
         # 思科: Version 15.2(4)E
-        match = re.search(r'Version\s+([^\s,]+)', output, re.IGNORECASE)
+        match = re.search(r"Version\s+([^\s,]+)", output, re.IGNORECASE)
         if match:
             return match.group(1)
 
@@ -314,7 +315,7 @@ class DeviceConnection:
     def _parse_ip_interface_brief(self, output: str, vendor: Vendor) -> List[Interface]:
         """解析IP接口简要信息"""
         interfaces = []
-        lines = output.strip().split('\n')
+        lines = output.strip().split("\n")
 
         # 跳过标题行
         for line in lines[1:]:
@@ -329,20 +330,20 @@ class DeviceConnection:
                 parts = line.split()
                 if len(parts) >= 4:
                     iface = Interface(name=parts[0])
-                    if parts[1] != '--' and parts[1] != 'unassigned':
+                    if parts[1] != "--" and parts[1] != "unassigned":
                         iface.ip = parts[1]
 
-                    if 'up' in line.lower():
+                    if "up" in line.lower():
                         iface.status = PortStatus.UP
-                    elif 'down' in line.lower():
+                    elif "down" in line.lower():
                         iface.status = PortStatus.DOWN
 
                     # 判断类型
-                    if 'Loopback' in parts[0]:
+                    if "Loopback" in parts[0]:
                         iface.port_type = PortType.LOOPBACK
-                    elif 'Vlanif' in parts[0] or 'Vlan' in parts[0]:
+                    elif "Vlanif" in parts[0] or "Vlan" in parts[0]:
                         iface.port_type = PortType.VLAN_INTERFACE
-                    elif 'Eth-trunk' in parts[0] or 'Po' in parts[0]:
+                    elif "Eth-trunk" in parts[0] or "Po" in parts[0]:
                         iface.port_type = PortType.AGGREGATE
 
                     interfaces.append(iface)
@@ -353,20 +354,20 @@ class DeviceConnection:
                 parts = line.split()
                 if len(parts) >= 6:
                     iface = Interface(name=parts[0])
-                    if parts[1] != 'unassigned':
+                    if parts[1] != "unassigned":
                         iface.ip = parts[1]
 
-                    if 'up' in parts[4].lower():
+                    if "up" in parts[4].lower():
                         iface.status = PortStatus.UP
-                    elif 'down' in parts[4].lower():
+                    elif "down" in parts[4].lower():
                         iface.status = PortStatus.DOWN
 
                     # 判断类型
-                    if 'Loopback' in parts[0]:
+                    if "Loopback" in parts[0]:
                         iface.port_type = PortType.LOOPBACK
-                    elif 'Vlan' in parts[0]:
+                    elif "Vlan" in parts[0]:
                         iface.port_type = PortType.VLAN_INTERFACE
-                    elif 'Port-channel' in parts[0]:
+                    elif "Port-channel" in parts[0]:
                         iface.port_type = PortType.AGGREGATE
 
                     interfaces.append(iface)
@@ -394,7 +395,7 @@ def test_connection(ip: str, port: int = 22, timeout: int = 5) -> bool:
         sock.close()
 
 
-def get_lldp_neighbors(connection: 'DeviceConnection') -> list:
+def get_lldp_neighbors(connection: "DeviceConnection") -> list:
     """获取 LLDP/CDP 邻居信息（模块级函数）"""
     from app.network.lldp import LLDPNeighborParser
     from app.network.commands import CommandBuilder

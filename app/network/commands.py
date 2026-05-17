@@ -2,6 +2,7 @@
 厂商命令映射表
 不同厂商的命令差异统一封装
 """
+
 from typing import Dict
 from app.core.device import Vendor
 
@@ -60,168 +61,125 @@ VENDOR_COMMANDS: Dict[Vendor, Dict[str, str]] = {
         # 基本信息
         CommandSet.GET_VERSION: "display version",
         CommandSet.GET_SYSTEM_INFO: "display device manuinfo",
-
         # 接口信息
         CommandSet.GET_INTERFACE_BRIEF: "display interface brief",
         CommandSet.GET_INTERFACE_STATUS: "display interface status",
         CommandSet.GET_IP_INTERFACE_BRIEF: "display ip interface brief",
-
         # LLDP
         CommandSet.GET_LLDP_NEIGHBOR: "display lldp neighbor",
         CommandSet.GET_LLDP_NEIGHBOR_DETAIL: "display lldp neighbor detail",
-
         # 聚合
         CommandSet.GET_AGGREGATE: "display eth-trunk",
         CommandSet.GET_AGGREGATE_MEMBER: "display eth-trunk {interface}",
-
         # VRRP
         CommandSet.GET_VRRP: "display vrrp",
-
         # 堆叠
         CommandSet.GET_STACK_INFO: "display stack",
-
         # VLAN
         CommandSet.GET_VLAN: "display vlan",
         CommandSet.GET_PORT_VLAN: "display port vlan {interface}",
-
         # OSPF
         CommandSet.GET_OSPF_NEIGHBOR: "display ospf peer",
-
         # BGP
         CommandSet.GET_BGP_NEIGHBOR: "display bgp peer",
-
         # 配置
         CommandSet.GET_RUNNING_CONFIG: "display current-configuration",
-
         # 测试
         CommandSet.PING: "ping {target}",
         CommandSet.TRACEROUTE: "tracert {target}",
     },
-
     Vendor.CISCO: {
         # 基本信息
         CommandSet.GET_VERSION: "show version",
         CommandSet.GET_SYSTEM_INFO: "show hardware",
-
         # 接口信息
         CommandSet.GET_INTERFACE_BRIEF: "show interface brief",
         CommandSet.GET_INTERFACE_STATUS: "show interface status",
         CommandSet.GET_IP_INTERFACE_BRIEF: "show ip interface brief",
-
         # CDP (思科专用)
         CommandSet.GET_CDP_NEIGHBOR: "show cdp neighbors",
         CommandSet.GET_CDP_NEIGHBOR_DETAIL: "show cdp neighbors detail",
-
         # 同时也支持LLDP
         CommandSet.GET_LLDP_NEIGHBOR: "show lldp neighbors",
         CommandSet.GET_LLDP_NEIGHBOR_DETAIL: "show lldp neighbors detail",
-
         # 聚合
         CommandSet.GET_AGGREGATE: "show etherchannel summary",
         CommandSet.GET_AGGREGATE_MEMBER: "show etherchannel {interface} port",
-
         # HSRP (思科专用)
         CommandSet.GET_HSRP: "show standby brief",
-
         # VRRP (思科也支持)
         CommandSet.GET_VRRP: "show vrrp brief",
-
         # 堆叠
         CommandSet.GET_STACK_INFO: "show switch",
-
         # VLAN
         CommandSet.GET_VLAN: "show vlan",
         CommandSet.GET_PORT_VLAN: "show interface {interface} switchport",
-
         # OSPF
         CommandSet.GET_OSPF_NEIGHBOR: "show ip ospf neighbor",
-
         # BGP
         CommandSet.GET_BGP_NEIGHBOR: "show bgp summary",
-
         # 配置
         CommandSet.GET_RUNNING_CONFIG: "show running-config",
-
         # 测试
         CommandSet.PING: "ping {target}",
         CommandSet.TRACEROUTE: "traceroute {target}",
     },
-
     Vendor.H3C: {
         # 基本信息
         CommandSet.GET_VERSION: "display version",
         CommandSet.GET_SYSTEM_INFO: "display device-info",
-
         # 接口信息
         CommandSet.GET_INTERFACE_BRIEF: "display interface brief",
         CommandSet.GET_INTERFACE_STATUS: "display interface status",
         CommandSet.GET_IP_INTERFACE_BRIEF: "display ip interface brief",
-
         # LLDP
         CommandSet.GET_LLDP_NEIGHBOR: "display lldp neighbor",
         CommandSet.GET_LLDP_NEIGHBOR_DETAIL: "display lldp neighbor detail",
-
         # 聚合
         CommandSet.GET_AGGREGATE: "display link-aggregation summary",
         CommandSet.GET_AGGREGATE_MEMBER: "display link-aggregation member-port {interface}",
-
         # VRRP
         CommandSet.GET_VRRP: "display vrrp",
-
         # 堆叠
         CommandSet.GET_STACK_INFO: "display stack",
-
         # VLAN
         CommandSet.GET_VLAN: "display vlan",
         CommandSet.GET_PORT_VLAN: "display port hybrid {interface}",
-
         # OSPF
         CommandSet.GET_OSPF_NEIGHBOR: "display ospf peer",
-
         # BGP
         CommandSet.GET_BGP_NEIGHBOR: "display bgp peer",
-
         # 配置
         CommandSet.GET_RUNNING_CONFIG: "display current-configuration",
-
         # 测试
         CommandSet.PING: "ping {target}",
         CommandSet.TRACEROUTE: "tracert {target}",
     },
-
     Vendor.JUNIPER: {
         # 基本信息
         CommandSet.GET_VERSION: "show version",
         CommandSet.GET_SYSTEM_INFO: "show chassis hardware",
-
         # 接口信息
         CommandSet.GET_INTERFACE_BRIEF: "show interface terse",
         CommandSet.GET_INTERFACE_STATUS: "show interface status",
         CommandSet.GET_IP_INTERFACE_BRIEF: "show ip interface terse",
-
         # LLDP
         CommandSet.GET_LLDP_NEIGHBOR: "show lldp neighbors",
         CommandSet.GET_LLDP_NEIGHBOR_DETAIL: "show lldp neighbors detail",
-
         # 聚合
         CommandSet.GET_AGGREGATE: "show chassis aggregated-devices",
         CommandSet.GET_AGGREGATE_MEMBER: "show interface ae* detail",
-
         # VRRP
         CommandSet.GET_VRRP: "show vrrp",
-
         # 路由协议
         CommandSet.GET_OSPF_NEIGHBOR: "show ospf neighbor",
         CommandSet.GET_BGP_NEIGHBOR: "show bgp summary",
-
         # 配置
         CommandSet.GET_RUNNING_CONFIG: "show configuration",
-
         # 测试
         CommandSet.PING: "ping {target}",
         CommandSet.TRACEROUTE: "traceroute {target}",
     },
-
     # 默认使用华为命令集
     Vendor.UNKNOWN: {},
 }
