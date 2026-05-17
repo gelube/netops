@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Web 诊断适配器 - 让诊断引擎可以复用 netops_tools 的 SSH 连接
 """

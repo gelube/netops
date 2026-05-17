@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 结构化日志模块 — 替代散落的 print() 调用
 

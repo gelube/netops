@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 统一命令执行服务 — 唯一的命令执行入口
 

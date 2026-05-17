@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 会话管理器
 支持多用户、多会话、上下文保持

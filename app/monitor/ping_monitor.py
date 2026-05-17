@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Ping 监控模块
 简单的连通性监控，只用 ping

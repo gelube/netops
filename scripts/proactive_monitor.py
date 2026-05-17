@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 NetOps Proactive Monitor - 主动监控和自检脚本
 """

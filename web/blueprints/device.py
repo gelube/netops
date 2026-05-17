@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 设备蓝图 - 设备CRUD、发现、信息采集
 """

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """LLM 配置模块"""
 
 import os
 import json
+import httpx
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from enum import Enum
@@ -161,7 +161,19 @@ class LLMClient:
 
                 # 免凭证（Ollama等本地部署）：api_key不能传空字符串，用占位符
                 api_key = self.config.api_key or "sk-no-key-required"
-                self._client = OpenAI(api_key=api_key, base_url=self.config.endpoint)
+                from httpx import Client as HttpxClient
+
+                # 配置连接池：超时+连接复用+keep-alive，防止CLOSE_WAIT泄漏
+                http_client = HttpxClient(
+                    timeout=60.0,
+                    limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+                )
+                self._client = OpenAI(
+                    api_key=api_key,
+                    base_url=self.config.endpoint,
+                    http_client=http_client,
+                    timeout=60.0,
+                )
             except ImportError:
                 raise ImportError("Please install openai: pip install openai")
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 聊天蓝图 - AI对话、快速配置、诊断
 """
@@ -15,6 +14,17 @@ chat_bp = Blueprint("chat", __name__)
 _data_dir = ""
 _devices_file = ""
 _project_root = ""
+_session_mgr = None  # 模块级SessionManager单例
+
+
+def _get_session_mgr():
+    """获取SessionManager单例，避免每次请求new"""
+    global _session_mgr
+    if _session_mgr is None:
+        from app.session import SessionManager
+        session_dir = os.path.join(_data_dir, "sessions")
+        _session_mgr = SessionManager(storage_dir=session_dir)
+    return _session_mgr
 
 
 def init_chat_blueprint(data_dir, devices_file, project_root):
@@ -88,10 +98,7 @@ def chat_clear():
     data = request.json or {}
     session_id = data.get("session_id", "default")
     try:
-        from app.session import SessionManager
-
-        session_dir = os.path.join(_data_dir, "sessions")
-        session_mgr = SessionManager(storage_dir=session_dir)
+        session_mgr = _get_session_mgr()
         session_mgr.delete_session(session_id)
         return jsonify({"success": True, "message": "会话已清除"})
     except Exception as e:
@@ -101,12 +108,10 @@ def chat_clear():
 def _do_exec_confirmed(confirmed_commands, session_id="default"):
     """执行已确认的命令（用户确认后调用）"""
     from app.network.command_service import CommandService
-    from app.session import SessionManager
     from app.session.models import TurnRole
 
     cmd_svc = CommandService()
-    session_dir = os.path.join(_data_dir, "sessions")
-    session_mgr = SessionManager(storage_dir=session_dir)
+    session_mgr = _get_session_mgr()
     devices = _load_devices()
     all_results = []
 
@@ -274,7 +279,6 @@ def _extract_commands_from_text(text, selected_device="", user_message=""):
 def _do_chat(message, selected_device, session_id="default", preview_only=False):
     """核心聊天逻辑"""
     from app.llm.config import LLMConfig, LLMClient, LLMConfigManager, _decrypt_api_key
-    from app.session import SessionManager
     from app.session.models import TurnRole
     from netops_tools import NetOpsTools, get_tools_definition
 
@@ -303,8 +307,7 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
         return {"success": False, "message": "LLM 未配置，请先在设置中配置"}
 
     tools = NetOpsTools(_devices_file)
-    session_dir = os.path.join(_data_dir, "sessions")
-    session_mgr = SessionManager(storage_dir=session_dir)
+    session_mgr = _get_session_mgr()
 
     # 加载会话历史
     session = session_mgr.get_session(session_id)

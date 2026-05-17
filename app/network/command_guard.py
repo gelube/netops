@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 命令安全守卫 - 在 LLM 生成命令后、SSH 执行前进行校验和防护
 

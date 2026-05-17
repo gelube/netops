@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 WebSocket推送服务 — 诊断进度、命令执行结果实时推送
 """

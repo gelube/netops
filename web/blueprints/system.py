@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 系统蓝图 - 审计日志、知识库、文件操作、LLM配置
 """
@@ -41,8 +40,8 @@ def handle_llm_config():
                 data["base_url"] = data["endpoint"]
             if data.get("base_url") and not data.get("endpoint"):
                 data["endpoint"] = data["base_url"]
-            return jsonify(data)
-        return jsonify({"provider": "", "model": "", "api_key": "", "base_url": "", "endpoint": ""})
+            return jsonify({"success": True, **data})
+        return jsonify({"success": True, "provider": "", "model": "", "api_key": "", "base_url": "", "endpoint": ""})
     else:
         data = request.json or {}
         config_file = os.path.join(_data_dir, "llm_config.json")

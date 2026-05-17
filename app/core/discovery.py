@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 拓扑发现模块 - 完善版
 支持 LLDP/CDP 自动发现

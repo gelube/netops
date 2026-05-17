@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 诊断知识库 - 积累诊断经验，快速定位问题
 

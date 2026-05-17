@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 意图解析器 - LLM 驱动的自然语言理解
 """

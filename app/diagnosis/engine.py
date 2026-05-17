@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 诊断引擎 - 协调各种诊断检查器
 """

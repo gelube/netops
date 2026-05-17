@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """NetOps AI Web - 精简入口，逻辑已拆分到blueprints/"""
 from flask import Flask, render_template
 import os

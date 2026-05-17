@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 拓扑蓝图 - 拓扑发现、渲染、模板管理
 """
@@ -95,7 +94,8 @@ def topology_state():
 
 @topology_bp.route("/api/topology/template/list", methods=["GET"])
 def topology_template_list():
-    return jsonify(_load_topology_templates())
+    templates = _load_topology_templates()
+    return jsonify({"success": True, "templates": templates})
 
 
 @topology_bp.route("/api/topology/template/save", methods=["POST"])
@@ -271,7 +271,7 @@ def ensure_lldp_on_all_devices(devices, force=False):
 
     tools = NetOpsTools(_devices_file)
     updated = []
-    log.info(f"ensure_lldp: processing {len(devices)} devices, force={force}")
+    log.debug(f"ensure_lldp: processing {len(devices)} devices, force={force}")
 
     for d in devices:
         name = d.get("remark") or d.get("name")
@@ -280,7 +280,7 @@ def ensure_lldp_on_all_devices(devices, force=False):
 
         # 已有LLDP数据则跳过（除非force）
         if d.get("lldp_neighbors") and not force:
-            log.info(f"ensure_lldp: {name} already has LLDP data, skipping")
+            log.debug(f"ensure_lldp: {name} already has LLDP data, skipping")
             updated.append(d)
             continue
 
@@ -302,7 +302,7 @@ def ensure_lldp_on_all_devices(devices, force=False):
                 ]
 
             for cmds in cmds_list:
-                log.info(f"LLDP discover: device={name}, vendor={vendor}, cmds={cmds}")
+                log.debug(f"LLDP discover: device={name}, vendor={vendor}, cmds={cmds}")
                 result = tools.execute_tool("run_commands", {"device": name, "commands": cmds})
                 if result.get("success") and result.get("results"):
                     lldp_text = result["results"][0].get("output", "")
@@ -314,7 +314,7 @@ def ensure_lldp_on_all_devices(devices, force=False):
                         log.info(f"LLDP discover: {name} command failed for {cmds}, trying next")
                         continue
                     d["lldp_neighbors"] = _extract_topology_links(lldp_text, name)
-                    log.info(
+                    log.debug(
                         f"LLDP discover: {name} parsed {len(d.get('lldp_neighbors', []))} neighbors, output_len={len(lldp_text)}"
                     )
                     if not d["lldp_neighbors"] and lldp_text:
@@ -328,7 +328,7 @@ def ensure_lldp_on_all_devices(devices, force=False):
             log.warning(f"LLDP discover: {name} exception: {e}")
             updated.append(d)
 
-    log.info(f"ensure_lldp: done, {sum(1 for d in updated if d.get('lldp_neighbors'))} devices have LLDP data")
+    log.info(f"ensure_lldp done: {sum(1 for d in updated if d.get('lldp_neighbors'))}/{len(devices)} devices have LLDP")
     return updated
 
 
@@ -362,27 +362,14 @@ def topology_discover():
     for d in devices:
         name = d.get("remark") or d.get("name")
         lldp = d.get("lldp_neighbors", [])
-        log.info(f"discover: {name} has {len(lldp)} lldp_neighbors")
+        log.debug(f"discover: {name} has {len(lldp)} lldp_neighbors")
         for link in lldp:
             link["from_name"] = name
             all_links.append(link)
 
-    log.info(f"discover: total all_links={len(all_links)}")
+    log.debug(f"discover: total all_links={len(all_links)}")
 
-    # 2.1 补全to_name为空的链路（用chassis_id匹配）
-    # 先构建chassis_id→设备映射：从每台设备的LLDP输出提取chassis_id
-    chassis_to_device = {}  # chassis_id -> device_name
-    for link in all_links:
-        cid = link.get("chassis_id", "")
-        if cid and link.get("from_name"):
-            # 这条链路的from_name设备看到的邻居chassis_id
-            pass
-    # 从所有链路中，每台from设备自己也有chassis_id
-    # 但更简单的方法：同一chassis_id出现在多条链路的to端，可以推断
-    # 先尝试：如果有设备名与chassis_id对应记录
-    # 实际上我们无法直接获取设备自身chassis_id，但可以用交叉匹配
-    # 策略：如果A看到chassis_id=xxx, port=P1, 而B的from_port=P1，则A的邻居是B
-    # 这在后面的单方向匹配中处理
+    # 2.1 chassis_id交叉匹配在后面单方向匹配中处理
 
     # 3. 去重（A→B 和 B→A 可能重复）
     seen = set()
@@ -461,7 +448,7 @@ def topology_discover():
 
     edges = []
     if all_sysnames_same:
-        log.info(f"discover: all sysnames same={sysname_count}, using cross-validation")
+        log.debug(f"discover: all sysnames same={sysname_count}, using cross-validation")
         # 先尝试双向交叉验证
         for i, la in enumerate(uniq_links):
             for lb in uniq_links[i + 1 :]:
@@ -502,7 +489,7 @@ def topology_discover():
                         )
         # 如果双向验证0链路，用chassis_id交叉匹配
         if not edges:
-            log.info("discover: cross-validation found 0 links, trying chassis_id matching")
+            log.debug("discover: cross-validation found 0 links, trying chassis_id matching")
             # 构建chassis_id到设备名的映射：从所有链路中，同一chassis_id被多台设备看到
             # 说明这些设备连着同一台邻居（或互为邻居）
             cid_seen_by = {}  # chassis_id -> [(device_name, from_port, to_port)]

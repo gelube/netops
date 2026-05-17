@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 设备凭证加密存储模块
 使用 keyring 或本地加密文件存储 SSH 凭证

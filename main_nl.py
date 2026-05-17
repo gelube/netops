@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 NetOps AI - 自然语言入口（纯 SSH 模式）
 """
