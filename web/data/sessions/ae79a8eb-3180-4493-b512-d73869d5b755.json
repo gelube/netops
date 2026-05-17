@@ -1,0 +1,38 @@
+{
+  "id": "ae79a8eb-3180-4493-b512-d73869d5b755",
+  "user_id": "test-new-123",
+  "created_at": "2026-05-17T18:15:13.721559",
+  "updated_at": "2026-05-17T18:15:16.105524",
+  "turns": [
+    {
+      "id": "e583dd3c-c1cd-4d30-9dca-3b3574c7e082",
+      "role": "user",
+      "content": "display version",
+      "timestamp": "2026-05-17T18:15:13.722272",
+      "intent_type": null,
+      "intent_params": {},
+      "execution_success": null,
+      "execution_data": {},
+      "referenced_devices": [],
+      "referenced_vlans": []
+    },
+    {
+      "id": "fc7eaa28-e45c-4011-8a4b-31b92f86f39c",
+      "role": "assistant",
+      "content": "已执行工具，结果如下：\n工具 list_devices: {\"success\": true, \"devices\": [{\"name\": \"SW1\", \"ip\": \"127.0.0.1\", \"port\": 30001, \"type\": \"telnet\", \"vendor\": \"h3c\"}, {\"name\": \"SW2\", \"ip\": \"127.0.0.1\", \"port\": 30002, \"type\": \"telnet\", \"vendor\": \"h3c\"}, {\"name\": \"出口路由\", \"ip\": \"127.0.0.1\", \"port\": 30004, \"type\": \"telnet\", \"vendor\": \"h3c\"}]}",
+      "timestamp": "2026-05-17T18:15:16.105523",
+      "intent_type": null,
+      "intent_params": {},
+      "execution_success": null,
+      "execution_data": {},
+      "referenced_devices": [],
+      "referenced_vlans": []
+    }
+  ],
+  "context": {},
+  "last_device": null,
+  "last_device_ip": null,
+  "last_vlan": null,
+  "last_interface": null,
+  "status": "active"
+}

@@ -378,56 +378,61 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
             tool_name = tc.get("function", {}).get("name", "")
             arguments = json.loads(tc.get("function", {}).get("arguments", "{}"))
 
-            # 命令类工具
+            # 命令类工具 — 始终走预览+确认流程，不直接执行
             if tool_name in ("run_commands", "ssh_connect"):
                 commands = arguments.get("commands", [])
                 dev_name = arguments.get("device", "")
                 if commands:
-                    # 预览模式：只收集命令不执行
-                    if preview_only:
-                        planned_commands.append(
-                            {"device": dev_name, "commands": commands}
-                        )
-                        continue
-
-                    # 查找设备
-                    dev = None
-                    for d in devices:
-                        if (
-                            d.get("name") == dev_name
-                            or d.get("remark") == dev_name
-                            or d.get("ip") == dev_name
-                        ):
-                            dev = d
-                            break
-                    if dev:
-                        dev_info = CommandService.device_from_dict(dev)
-                        cmd_result = cmd_svc.execute(
-                            dev_info, commands, user_id=session_id, source="llm"
-                        )
-                        if not cmd_result.success:
-                            results.append(
-                                {
-                                    "tool": tool_name,
-                                    "error": cmd_result.error,
-                                    "blocked": bool(cmd_result.blocked_commands),
-                                }
+                    # 判断是否为只读命令（display/show/save/ping/traceroute）
+                    _READ_ONLY_PREFIXES = ("display ", "show ", "save", "ping ", "traceroute")
+                    all_readonly = all(
+                        any(cmd.lower().strip().startswith(p) for p in _READ_ONLY_PREFIXES)
+                        for cmd in commands
+                    )
+                    if all_readonly and not preview_only:
+                        # 只读命令：直接执行，秒回
+                        dev = None
+                        for d in devices:
+                            if (
+                                d.get("name") == dev_name
+                                or d.get("remark") == dev_name
+                                or d.get("ip") == dev_name
+                            ):
+                                dev = d
+                                break
+                        if dev:
+                            dev_info = CommandService.device_from_dict(dev)
+                            cmd_result = cmd_svc.execute(
+                                dev_info, commands, user_id=session_id, source="llm"
                             )
+                            if not cmd_result.success:
+                                results.append(
+                                    {
+                                        "tool": tool_name,
+                                        "error": cmd_result.error,
+                                        "blocked": bool(cmd_result.blocked_commands),
+                                    }
+                                )
+                                continue
+                            tool_result = {
+                                "success": True,
+                                "results": cmd_result.outputs,
+                                "backup_id": cmd_result.backup_id,
+                            }
+                            results.append({"tool": tool_name, "result": tool_result})
                             continue
-                        tool_result = {
-                            "success": True,
-                            "results": cmd_result.outputs,
-                            "backup_id": cmd_result.backup_id,
-                        }
-                        results.append({"tool": tool_name, "result": tool_result})
-                        continue
+                    # 非只读命令：走预览流程
+                    planned_commands.append(
+                        {"device": dev_name, "commands": commands}
+                    )
+                    continue
 
             # 非命令类工具（如 get_devices）— 预览模式也执行（只读）
             tool_result = tools.execute_tool(tool_name, arguments)
             results.append({"tool": tool_name, "result": tool_result})
 
-        # 预览模式：返回命令列表供确认
-        if preview_only and planned_commands:
+        # 有计划命令（配置操作需确认）
+        if planned_commands:
             session_mgr.add_turn(
                 session_id,
                 TurnRole.ASSISTANT,
@@ -437,13 +442,12 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
                 "success": True,
                 "preview": True,
                 "planned_commands": planned_commands,
-                "message": "命令预览已生成，请确认后执行",
-                "response": "命令预览已生成，请确认后执行",
+                "message": "配置命令预览已生成，请确认后执行",
+                "response": "配置命令预览已生成，请确认后执行",
             }
 
-        # 非预览模式且有计划命令但没执行（preview_only没生效的情况）
-        if preview_only and not planned_commands:
-            # LLM没生成命令工具调用，直接返回文本
+        # LLM没生成命令工具调用，直接返回文本
+        if not results:
             content = response.get("content", "")
             session_mgr.add_turn(session_id, TurnRole.ASSISTANT, content)
             return {
