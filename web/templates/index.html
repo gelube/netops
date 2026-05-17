@@ -2182,6 +2182,23 @@
               else if(!r.success) { parts.push(`❌ ${r.error||'失败'}`); }
             }
             res = {success:true, response: parts.join('\n---\n')||'查询完成', _fast:true};
+          } else if(qd.commands && qd.preview) {
+            // 模板匹配返回命令列表，走确认流程
+            const planned = [{device: qd.device||devName, commands: qd.commands}];
+            let previewHtml = '<div style="color:#f59e0b;font-weight:600;margin-bottom:6px;">⚠️ 配置命令预览</div>';
+            planned.forEach(c => {
+              previewHtml += `<div style="margin-bottom:6px;"><span style="color:#22d3ee;font-size:12px;font-weight:600;">${c.device}</span>`;
+              previewHtml += `<pre style="background:#0b1220;border:1px solid #334155;border-radius:4px;padding:8px;font-size:12px;overflow-x:auto;">${c.commands.join('\n')}</pre>`;
+              previewHtml += '</div>';
+            });
+            previewHtml += `<div style="display:flex;gap:6px;margin-top:8px;">`;
+            const cmdKey = '_pcmd_' + Date.now();
+            window[cmdKey] = { cmds: planned, msg, context: {selected_device: devName} };
+            previewHtml += `<button class="btn" style="background:#16a34a;color:#fff;" onclick="confirmChatExec(this, window['${cmdKey}'].cmds, window['${cmdKey}'].msg, window['${cmdKey}'].context); delete window['${cmdKey}']">确认执行</button>`;
+            previewHtml += `<button class="btn" onclick="this.parentElement.parentElement.remove()">取消</button>`;
+            previewHtml += `</div>`;
+            addMsg('ai', previewHtml);
+            res = {success:true, response: '配置命令已生成', _fast:true};
           }
         } catch(e) { /* fallback to LLM */ }
         // 快速模板没匹配到，走LLM

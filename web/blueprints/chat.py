@@ -692,6 +692,7 @@ def quick_config():
         return jsonify(
             {
                 "success": True,
+                "preview": True,
                 "commands": template_commands,
                 "source": "template",
                 "device": device_name,
@@ -1089,4 +1090,4 @@ def config_snapshot():
     differ = ConfigDiff(storage_dir=os.path.join(_data_dir, "config_snapshots"))
     filepath = differ.save_config(device_ip, config, label)
 
-    return jsonify({"success": True, "filepath": filepath})
+    return jsonify({"success": True, "snapshot_id": filepath, "filepath": filepath})
