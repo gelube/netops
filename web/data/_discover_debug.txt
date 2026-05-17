@@ -1,3 +1,4 @@
-Links: 2
+Links: 3
   SW1 GE1/0/2 -> SW2 GE1/0/1
   SW1 GE1/0/3 -> SW2 GE1/0/3
+  SW2 GE1/0/2 -> 出口路由 GE0/0/0

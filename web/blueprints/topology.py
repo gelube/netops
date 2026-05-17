@@ -153,19 +153,41 @@ def _extract_topology_links(text, local_name):
     if not text or not local_name:
         return links
 
-    # H3C/华为 list格式: 表格行 "GE1/0/1  6208-580d-0100  GigabitEthernet1/0/2  H3C"
-    if re.search(r"Local Interface\s+Chassis ID\s+Port ID\s+System Name", text):
+    # H3C/华为 list格式: 表格行
+    # 格式1: "Local Interface  Chassis ID  Port ID  System Name"
+    # 格式2: "LocalIf  Nbr chassis ID  Nbr port ID  Nbr system name"
+    if re.search(r"Local(?:If| Interface)\s+(?:Nbr\s+)?(?:Chassis|chassis)\s+ID", text, re.IGNORECASE):
         for line in text.strip().split("\n"):
+            # 跳过表头行
+            if re.match(r'Local', line.strip(), re.IGNORECASE):
+                continue
+            # 尝试4列匹配（含System Name）
             m = re.match(
                 r"((?:GE|XGE|10GE|40GE|100GE|Eth|Ethernet|GigabitEthernet)\S+)\s+(\S+)\s+(\S+)\s+(\S+)", line.strip()
             )
-            if m and m.group(1) != "Local":
+            if m:
                 links.append(
                     {
                         "from_name": local_name,
                         "from_port": m.group(1),
                         "to_name": m.group(4),
                         "to_port": m.group(3),
+                        "chassis_id": m.group(2),
+                    }
+                )
+                continue
+            # 3列匹配（无System Name，用Chassis ID标识）
+            m = re.match(
+                r"((?:GE|XGE|10GE|40GE|100GE|Eth|Ethernet|GigabitEthernet)\S+)\s+(\S+)\s+(\S+)", line.strip()
+            )
+            if m:
+                links.append(
+                    {
+                        "from_name": local_name,
+                        "from_port": m.group(1),
+                        "to_name": "",  # 无System Name，后续用chassis_id匹配
+                        "to_port": m.group(3),
+                        "chassis_id": m.group(2),
                     }
                 )
         if links:
@@ -347,6 +369,21 @@ def topology_discover():
 
     log.info(f"discover: total all_links={len(all_links)}")
 
+    # 2.1 补全to_name为空的链路（用chassis_id匹配）
+    # 先构建chassis_id→设备映射：从每台设备的LLDP输出提取chassis_id
+    chassis_to_device = {}  # chassis_id -> device_name
+    for link in all_links:
+        cid = link.get("chassis_id", "")
+        if cid and link.get("from_name"):
+            # 这条链路的from_name设备看到的邻居chassis_id
+            pass
+    # 从所有链路中，每台from设备自己也有chassis_id
+    # 但更简单的方法：同一chassis_id出现在多条链路的to端，可以推断
+    # 先尝试：如果有设备名与chassis_id对应记录
+    # 实际上我们无法直接获取设备自身chassis_id，但可以用交叉匹配
+    # 策略：如果A看到chassis_id=xxx, port=P1, 而B的from_port=P1，则A的邻居是B
+    # 这在后面的单方向匹配中处理
+
     # 3. 去重（A→B 和 B→A 可能重复）
     seen = set()
     uniq_links = []
@@ -425,6 +462,7 @@ def topology_discover():
     edges = []
     if all_sysnames_same:
         log.info(f"discover: all sysnames same={sysname_count}, using cross-validation")
+        # 先尝试双向交叉验证
         for i, la in enumerate(uniq_links):
             for lb in uniq_links[i + 1 :]:
                 la_fp = _normalize_port(la.get("from_port", ""))
@@ -462,6 +500,49 @@ def topology_discover():
                                 "protocol": "lldp",
                             }
                         )
+        # 如果双向验证0链路，用chassis_id交叉匹配
+        if not edges:
+            log.info("discover: cross-validation found 0 links, trying chassis_id matching")
+            # 构建chassis_id到设备名的映射：从所有链路中，同一chassis_id被多台设备看到
+            # 说明这些设备连着同一台邻居（或互为邻居）
+            cid_seen_by = {}  # chassis_id -> [(device_name, from_port, to_port)]
+            for link in uniq_links:
+                cid = link.get("chassis_id", "")
+                if not cid:
+                    continue
+                fname = link.get("from_name", "")
+                fport = link.get("from_port", "")
+                tport = link.get("to_port", "")
+                cid_seen_by.setdefault(cid, []).append((fname, fport, tport))
+
+            # 如果同一chassis_id被2台设备看到，且A.to_port归一化后匹配B.from_port，则A↔B
+            for cid, sightings in cid_seen_by.items():
+                if len(sightings) < 2:
+                    continue
+                for i, (name_a, fport_a, tport_a) in enumerate(sightings):
+                    for name_b, fport_b, tport_b in sightings[i + 1 :]:
+                        # A看到邻居port=tport_a, B看到自己port=fport_b
+                        # 如果tport_a归一化后==fport_b归一化，则A的邻居是B
+                        matched = False
+                        if _normalize_port(tport_a) == _normalize_port(fport_b):
+                            # A的邻居是B
+                            fid = next((d.get("id") for d in devices if d.get("name") == name_a or d.get("remark") == name_a), None)
+                            tid = next((d.get("id") for d in devices if d.get("name") == name_b or d.get("remark") == name_b), None)
+                            if fid and tid:
+                                edges.append({"from": fid, "to": tid, "id": f"link_{len(edges) + 1}",
+                                    "from_name": name_a, "to_name": name_b,
+                                    "from_port": fport_a, "to_port": fport_b,
+                                    "link_type": "unknown", "protocol": "lldp"})
+                                matched = True
+                        if not matched and _normalize_port(tport_b) == _normalize_port(fport_a):
+                            # B的邻居是A
+                            fid = next((d.get("id") for d in devices if d.get("name") == name_b or d.get("remark") == name_b), None)
+                            tid = next((d.get("id") for d in devices if d.get("name") == name_a or d.get("remark") == name_a), None)
+                            if fid and tid:
+                                edges.append({"from": fid, "to": tid, "id": f"link_{len(edges) + 1}",
+                                    "from_name": name_b, "to_name": name_a,
+                                    "from_port": fport_b, "to_port": fport_a,
+                                    "link_type": "unknown", "protocol": "lldp"})
     else:
         for link in uniq_links:
             fid = device_map.get(link.get("from_name"))

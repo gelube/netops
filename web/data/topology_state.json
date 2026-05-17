@@ -70,7 +70,18 @@
       "to_port": "GE1/0/3",
       "link_type": "unknown",
       "protocol": "lldp"
+    },
+    {
+      "from": "dev_1778993309159",
+      "to": "dev_1779007247489",
+      "id": "link_3",
+      "from_name": "SW2",
+      "to_name": "出口路由",
+      "from_port": "GE1/0/2",
+      "to_port": "GE0/0/0",
+      "link_type": "unknown",
+      "protocol": "lldp"
     }
   ],
-  "version": 1538
+  "version": 1543
 }

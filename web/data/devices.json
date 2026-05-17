@@ -21,13 +21,15 @@
         "from_name": "SW1",
         "from_port": "GE1/0/2",
         "to_name": "H3C",
-        "to_port": "GigabitEthernet1/0/1"
+        "to_port": "GigabitEthernet1/0/1",
+        "chassis_id": "6208-6b5e-0200"
       },
       {
         "from_name": "SW1",
         "from_port": "GE1/0/3",
         "to_name": "H3C",
-        "to_port": "GigabitEthernet1/0/3"
+        "to_port": "GigabitEthernet1/0/3",
+        "chassis_id": "6208-6b5e-0200"
       }
     ]
   },
@@ -53,13 +55,22 @@
         "from_name": "SW2",
         "from_port": "GE1/0/1",
         "to_name": "H3C",
-        "to_port": "GigabitEthernet1/0/2"
+        "to_port": "GigabitEthernet1/0/2",
+        "chassis_id": "6208-580d-0100"
+      },
+      {
+        "from_name": "SW2",
+        "from_port": "GE1/0/2",
+        "to_name": "H3C",
+        "to_port": "GigabitEthernet0/0/0",
+        "chassis_id": "6287-4a2b-0400"
       },
       {
         "from_name": "SW2",
         "from_port": "GE1/0/3",
         "to_name": "H3C",
-        "to_port": "GigabitEthernet1/0/3"
+        "to_port": "GigabitEthernet1/0/3",
+        "chassis_id": "6208-580d-0100"
       }
     ]
   },
@@ -78,6 +89,14 @@
       "model": "w710",
       "version_output": "\n[H3C]\n[H3C]show version\nH3C Comware Software, Version 7.1.075, ESS 8305\nCopyright (c) 2004-2022 New H3C Technologies Co., Ltd. All rights reserved.\nH3C MSR36-20 uptime is 0 weeks, 0 days, 0 hours, 2 minutes\nLast reboot reason: User reboot\nBoot image: flash:/vsr88-cmw710-boot-a7514.bin\nBoot image version: 7.1.075, ESS 8305\n  Compiled Oct 26 2022 11:00:00\nBoot image: flash:/vsr88-cmw710-system-a7514.bin\nBoot image version: 7.1.075, ESS 8305\n  Compiled Oct 26 2022 11:00:00\n\nCPU ID: 0x2\n768M bytes DDR3 SDRAM Memory\n1024M bytes Flash Memory\nPCB               Version:  2.0\nCPLD              Version:  1.0\nBasic    BootWare Version:  1.42\nExtended BootWare Version:  1.42\n\n[H3C]"
     },
-    "lldp_neighbors": []
+    "lldp_neighbors": [
+      {
+        "from_name": "出口路由",
+        "from_port": "GE0/0/0",
+        "to_name": "H3C",
+        "to_port": "GigabitEthernet1/0/2",
+        "chassis_id": "6208-6b5e-0200"
+      }
+    ]
   }
 ]
