@@ -243,21 +243,21 @@ def _extract_topology_links(text, local_name):
     return links
 
 
-def ensure_lldp_on_all_devices(devices):
+def ensure_lldp_on_all_devices(devices, force=False):
     """确保所有设备的LLDP信息已采集"""
     from netops_tools import NetOpsTools
 
     tools = NetOpsTools(_devices_file)
     updated = []
-    log.info(f"ensure_lldp: processing {len(devices)} devices")
+    log.info(f"ensure_lldp: processing {len(devices)} devices, force={force}")
 
     for d in devices:
         name = d.get("remark") or d.get("name")
         if not name:
             continue
 
-        # 已有LLDP数据则跳过
-        if d.get("lldp_neighbors"):
+        # 已有LLDP数据则跳过（除非force）
+        if d.get("lldp_neighbors") and not force:
             log.info(f"ensure_lldp: {name} already has LLDP data, skipping")
             updated.append(d)
             continue
@@ -326,8 +326,14 @@ def topology_discover():
     if not devices:
         return jsonify({"success": False, "message": "没有可发现的设备"})
 
-    # 1. 先确保所有设备有LLDP数据
-    devices = ensure_lldp_on_all_devices(devices)
+    # 1. 先确保所有设备有LLDP数据（强制重新采集，确保拓扑最新）
+    devices = ensure_lldp_on_all_devices(devices, force=True)
+    # 1.1 将LLDP数据写回devices.json，避免下次重新采集
+    try:
+        with open(_devices_file, "w", encoding="utf-8") as f:
+            json.dump(devices, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log.warning(f"discover: failed to save devices.json: {e}")
 
     # 2. 收集所有链路
     all_links = []

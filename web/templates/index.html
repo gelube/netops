@@ -337,7 +337,10 @@
         btn.disabled = true; btn.textContent = '发现中...';
         addMsg('system', '⏳ 重新发现拓扑...');
         try {
-          const r = await fetch('/api/topology/discover', { method: 'POST' });
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 180000);
+          const r = await fetch('/api/topology/discover', { method: 'POST', signal: controller.signal });
+          clearTimeout(timer);
           const d = await r.json();
           if (d.success) {
             topologyState = d.state || topologyState;
@@ -1064,12 +1067,20 @@
     async function loadTopologyTemplate() { /* placeholder */ }
 
     async function discoverTopology() {
-      const r = await fetch('/api/topology/discover', { method: 'POST' });
-      const d = await r.json();
-      if (!d.success) { alert(d.message || '识别失败'); return; }
-      topologyState = d.state || topologyState;
-      renderTopology();
-      addMsg('system', `拓扑识别完成，发现 ${d.discovered_links || 0} 条连线`);
+      addMsg('system', '⏳ 正在发现拓扑，可能需要1-2分钟...');
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 180000); // 3分钟超时
+        const r = await fetch('/api/topology/discover', { method: 'POST', signal: controller.signal });
+        clearTimeout(timer);
+        const d = await r.json();
+        if (!d.success) { addMsg('system', '❌ ' + (d.message || '发现失败')); return; }
+        topologyState = d.state || topologyState;
+        renderTopology();
+        addMsg('system', `✅ 拓扑发现完成，${d.nodes || 0}个节点 ${d.links || 0}条链路`);
+      } catch(e) {
+        addMsg('system', '❌ 拓扑发现超时或失败: ' + e.message);
+      }
     }
 
     async function applyTopology() {
