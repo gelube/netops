@@ -410,6 +410,7 @@ def quick_config():
     device_name = data.get('device', '')
     config_type = data.get('type', '')
     parameters = data.get('parameters', {})
+    mode = data.get('mode', 'preview')  # preview=只返回命令, execute=执行
 
     if not device_name:
         return jsonify({'success': False, 'message': '请指定设备'})
@@ -426,9 +427,96 @@ def quick_config():
         return jsonify({'success': False, 'message': f'设备 {device_name} 不存在'})
 
     vendor = device.get('vendor', 'huawei')
-    netmiko_type = {'huawei': 'huawei', 'h3c': 'huawei', 'cisco': 'cisco_ios', 'juniper': 'juniper_junos'}.get(vendor, 'huawei')
+
+    # mode=execute: 直接执行前端传来的命令
+    if mode == 'execute':
+        exec_commands = []
+        for item in (data.get('commands') or []):
+            if isinstance(item, dict):
+                exec_commands.extend(item.get('commands', []))
+            elif isinstance(item, str):
+                exec_commands.append(item)
+        if not exec_commands:
+            return jsonify({'success': False, 'message': '无命令可执行'})
+        from app.network.command_service import CommandService
+        dev_info = CommandService.device_from_dict(device)
+        cmd_result = CommandService().execute(
+            dev_info, exec_commands,
+            source='quick-config',
+        )
+        result = {'success': cmd_result.success}
+        if cmd_result.success:
+            result['results'] = [{'success': True, 'results': [
+                {'command': r.get('command', ''), 'output': r.get('output', '')}
+                for r in (cmd_result.outputs or [])
+            ]}]
+        else:
+            result['error'] = cmd_result.error or '执行失败'
+        return jsonify(result)
+
+    # mode=query: 快速查询（只读命令，直接执行）
+    if mode == 'query':
+        query_commands = data.get('commands', [])
+        if isinstance(query_commands, str):
+            query_commands = [query_commands]
+        if not query_commands:
+            return jsonify({'success': False, 'message': '无查询命令'})
+        from app.network.command_service import CommandService
+        dev_info = CommandService.device_from_dict(device)
+        cmd_result = CommandService().execute(
+            dev_info, query_commands,
+            source='quick-config',
+            skip_guard=True,  # 只读查询
+        )
+        result = {'success': cmd_result.success, 'query': True}
+        if cmd_result.success:
+            result['results'] = [{'success': True, 'results': [
+                {'command': r.get('command', ''), 'output': r.get('output', '')}
+                for r in (cmd_result.outputs or [])
+            ]}]
+        else:
+            result['error'] = cmd_result.error or '查询失败'
+        return jsonify(result)
+
+    # mode=preview: 快速模板匹配（秒回）
+    message = data.get('message', '')
+    if mode == 'preview' and message and not config_type:
+        # 简单自然语言匹配
+        _QUERY_MAP = {
+            '版本': 'display version', 'vlan': 'display vlan',
+            '路由': 'display ip routing-table', 'arp': 'display arp',
+            '接口': 'display interface brief', 'mac': 'display mac-address',
+            '配置': 'display current-configuration', 'cpu': 'display cpu-usage',
+            '内存': 'display memory', '日志': 'display logbuffer',
+            '邻居': 'display lldp neighbor-information list',
+            '告警': 'display alarm',
+        }
+        matched_cmd = None
+        for kw, cmd in _QUERY_MAP.items():
+            if kw in message:
+                matched_cmd = cmd
+                break
+        if matched_cmd:
+            from app.network.command_service import CommandService
+            dev_info = CommandService.device_from_dict(device)
+            cmd_result = CommandService().execute(
+                dev_info, [matched_cmd],
+                source='quick-config', skip_guard=True,
+            )
+            result = {'success': cmd_result.success, 'matched': True, 'query': True}
+            if cmd_result.success:
+                result['results'] = [{'success': True, 'results': [
+                    {'command': r.get('command', ''), 'output': r.get('output', '')}
+                    for r in (cmd_result.outputs or [])
+                ]}]
+            else:
+                result['error'] = cmd_result.error or '查询失败'
+            return jsonify(result)
+        # 没匹配到，返回空让前端走LLM
+        return jsonify({'success': True, 'matched': False})
 
     # 1. 模板优先
+    netmiko_type = {'huawei': 'huawei', 'h3c': 'huawei', 'cisco': 'cisco_ios', 'juniper': 'juniper_junos'}.get(vendor, 'huawei')
     from app.network.command_templates import TemplateMatcher
     template_commands = TemplateMatcher.match(
         intent_type=config_type,
@@ -519,8 +607,8 @@ def api_diagnose():
     # 获取诊断命令
     if vendor in ('huawei', 'h3c'):
         cmd_map = {
-            'connectivity': ['ping ', 'display arp', 'display mac-address'],
-            'routing': ['display ip routing-table', 'display ospf peer brief'],
+            'connectivity': ['display arp', 'display mac-address', 'display interface brief'],
+            'routing': ['display ip routing-table', 'display ospf peer'],
             'vlan': ['display vlan', 'display interface brief'],
             'interface': ['display interface', 'display link-aggregation summary'],
         }
@@ -534,9 +622,12 @@ def api_diagnose():
 
     commands = cmd_map.get(diagnose_type, cmd_map['connectivity'])
 
-    # ping需要目标
-    if diagnose_type == 'connectivity' and data.get('target'):
-        commands[0] = f"{commands[0].strip()} {data['target']}"
+    # ping需要目标，无目标则跳过ping命令
+    if diagnose_type == 'connectivity':
+        if data.get('target'):
+            commands[0] = f"{commands[0].strip()} {data['target']}"
+        else:
+            commands = [c for c in commands if not c.strip().startswith('ping')]
 
     # 统一走 CommandService（含安全检查）
     from app.network.command_service import CommandService
@@ -552,8 +643,48 @@ def api_diagnose():
         result['results'] = cmd_result.outputs
         analysis = _analyze_diagnosis(cmd_result.outputs, diagnose_type)
         result['analysis'] = analysis
+        # 构建前端期望的 steps/root_cause/suggestions 格式
+        steps = []
+        fail_count = 0
+        findings = analysis.get('findings', [])
+        finding_idx = 0
+        error_patterns = ['wrong parameter', 'unrecognized command', 'incomplete command',
+                          'error:', 'syntax error', 'invalid input', '% ']
+        for r in cmd_result.outputs:
+            cmd = r.get('command', '')
+            output = r.get('output', '')
+            status = 'PASS'
+            message = output[:200].replace('\n', ' ').strip() if output else '无输出'
+            suggestion = ''
+            # 检测命令执行错误
+            output_lower = output.lower()
+            is_error = any(p in output_lower for p in error_patterns)
+            if is_error:
+                status = 'WARNING'
+                message = f'命令不支持或执行失败: {cmd}'
+            # 按顺序匹配findings（仅对非错误命令）
+            elif finding_idx < len(findings):
+                f = findings[finding_idx]
+                if '❌' in f:
+                    status = 'FAIL'
+                    fail_count += 1
+                elif '⚠️' in f:
+                    status = 'WARNING'
+                message = f.replace('❌','').replace('⚠️','').replace('✅','').strip()
+                finding_idx += 1
+            steps.append({'step': cmd, 'status': status, 'message': message, 'suggestion': suggestion})
+        result['steps'] = steps
+        if fail_count > 0:
+            result['root_cause'] = f'{diagnose_type}诊断发现 {fail_count} 个失败项'
+            result['suggestions'] = ['请检查对应配置并修复']
+        else:
+            result['root_cause'] = ''
+            result['suggestions'] = []
     else:
         result['message'] = cmd_result.error
+        result['steps'] = []
+        result['root_cause'] = cmd_result.error
+        result['suggestions'] = []
 
     return jsonify(result)
 
@@ -565,6 +696,13 @@ def _analyze_diagnosis(results, diagnose_type):
     for r in results:
         output = r.get('output', '').lower()
         cmd = r.get('command', '')
+
+        # 检测命令执行错误
+        error_sigs = ['wrong parameter', 'unrecognized command', 'incomplete command',
+                      'syntax error', 'invalid input']
+        if any(sig in output for sig in error_sigs):
+            analysis['findings'].append('⚠️ 命令不支持或执行失败')
+            continue
 
         if 'ping' in cmd:
             if '100% packet loss' in output or '0 packets received' in output:
@@ -589,6 +727,32 @@ def _analyze_diagnosis(results, diagnose_type):
                 analysis['findings'].append('⚠️ 路由表为空')
             else:
                 analysis['findings'].append('✅ 路由表有条目')
+
+        elif 'ospf' in cmd:
+            if 'not configured' in output or 'not enabled' in output:
+                analysis['findings'].append('⚠️ OSPF未配置')
+            elif 'full' in output or 'neighbor' in output:
+                analysis['findings'].append('✅ OSPF邻居正常')
+            else:
+                analysis['findings'].append('ℹ️ OSPF无邻居')
+
+        elif 'vlan' in cmd:
+            if not output.strip() or 'no vlans' in output:
+                analysis['findings'].append('⚠️ 无VLAN')
+            else:
+                analysis['findings'].append('✅ VLAN配置正常')
+
+        elif 'interface' in cmd and 'brief' not in cmd:
+            if 'down' in output and 'up' not in output:
+                analysis['findings'].append('⚠️ 接口全部down')
+            else:
+                analysis['findings'].append('✅ 接口状态正常')
+
+        elif 'mac-address' in cmd or 'mac address' in cmd:
+            if not output.strip() or len(output.strip()) < 20:
+                analysis['findings'].append('⚠️ MAC表为空')
+            else:
+                analysis['findings'].append('✅ MAC表有条目')
 
     return analysis
 
