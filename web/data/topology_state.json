@@ -38,7 +38,7 @@
       "y": 40,
       "facts": {
         "hostname": "H3C",
-        "last_collected": "2026-05-19T14:30:01.976812"
+        "last_collected": "2026-05-19T14:31:43.774738"
       },
       "lldp_status": "enabled"
     }
@@ -49,7 +49,7 @@
       "from_name": "接入交换机",
       "from_port": "GE1/0/1",
       "id": "link_1",
-      "last_seen": "2026-05-19T14:30:01.345958",
+      "last_seen": "2026-05-19T14:31:37.345310",
       "link_type": "unknown",
       "lost_at": null,
       "protocol": "lldp",
@@ -60,26 +60,11 @@
       "to_port": "GigabitEthernet1/0/1"
     },
     {
-      "from": "dev_1779098566401",
-      "from_name": "接入交换机",
-      "from_port": "GE1/0/2",
-      "id": "link_2",
-      "last_seen": "2026-05-19T14:30:01.345958",
-      "link_type": "unknown",
-      "lost_at": null,
-      "protocol": "lldp",
-      "source": "lldp",
-      "status": "active",
-      "to": "dev_1779098580000",
-      "to_name": "核心交换机",
-      "to_port": "GigabitEthernet1/0/3"
-    },
-    {
       "from": "dev_1779098580000",
       "from_name": "核心交换机",
       "from_port": "GE1/0/2",
-      "id": "link_3",
-      "last_seen": "2026-05-19T14:30:01.345958",
+      "id": "link_2",
+      "last_seen": "2026-05-19T14:31:37.345310",
       "link_type": "unknown",
       "lost_at": null,
       "protocol": "lldp",
@@ -90,5 +75,5 @@
       "to_port": "GigabitEthernet0/0/0"
     }
   ],
-  "version": 380
+  "version": 382
 }

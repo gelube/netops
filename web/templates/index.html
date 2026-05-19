@@ -1165,7 +1165,7 @@
       addMsg('user', `🔍 全面诊断: ${dev}`);
       _chatBusy = true;
       _chatAbort = new AbortController();
-      const thinkingHtml = '<div class="chat-msg ai" id="thinking-placeholder"><span style="color:#67e8f9">⏳ 正在全面诊断...</span></div>';
+      const thinkingHtml = '<div class="msg msg-ai" id="thinking-placeholder"><span style="color:#67e8f9">⏳ 正在全面诊断...</span></div>';
       document.getElementById('messages').insertAdjacentHTML('beforeend', thinkingHtml);
       try {
         const r = await fetch('/api/chat', {
@@ -1348,7 +1348,7 @@
         const d = await resp.json();
         if (d.success) {
           chatHistory.length = 0;
-          const box = document.getElementById('chat-messages');
+          const box = document.getElementById('messages');
           box.innerHTML = '<div style="color:#64748b;text-align:center;padding:20px;">对话已清空</div>';
         }
       } catch(e) {
@@ -1420,8 +1420,8 @@
       document.getElementById('btn-send').style.display = 'none';
       
       // 思考中占位
-      const thinkingHtml = '<div class="chat-msg ai" id="thinking-placeholder"><span style="color:#67e8f9">⏳ 思考中...</span></div>';
-      document.getElementById('chat-messages').insertAdjacentHTML('beforeend', thinkingHtml);
+      const thinkingHtml = '<div class="msg msg-ai" id="thinking-placeholder"><span style="color:#67e8f9">⏳ 思考中...</span></div>';
+      document.getElementById('messages').insertAdjacentHTML('beforeend', thinkingHtml);
       
       try {
         const r = await fetch('/api/chat', {

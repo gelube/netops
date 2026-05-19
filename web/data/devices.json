@@ -21,13 +21,6 @@
         "to_name": "核心交换机",
         "to_port": "GigabitEthernet1/0/1",
         "chassis_id": "6874-2a6b-0200"
-      },
-      {
-        "from_name": "接入交换机",
-        "from_port": "GE1/0/2",
-        "to_name": "核心交换机",
-        "to_port": "GigabitEthernet1/0/3",
-        "chassis_id": "6874-2a6b-0200"
       }
     ],
     "sysname": "H3C",
@@ -62,13 +55,6 @@
         "to_name": "出口路",
         "to_port": "GigabitEthernet0/0/0",
         "chassis_id": "6874-dafe-0300"
-      },
-      {
-        "from_name": "核心交换机",
-        "from_port": "GE1/0/3",
-        "to_name": "接入交换机",
-        "to_port": "GigabitEthernet1/0/2",
-        "chassis_id": "6873-af13-0100"
       }
     ],
     "sysname": "H3C",
@@ -87,7 +73,7 @@
     "device_type": "router",
     "facts": {
       "hostname": "H3C",
-      "last_collected": "2026-05-19T14:30:01.976812"
+      "last_collected": "2026-05-19T14:31:43.774738"
     },
     "lldp_neighbors": [
       {
