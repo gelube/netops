@@ -8,13 +8,18 @@ import json
 import os
 import re
 import time
+import threading
 from datetime import datetime
 
 from app.logger import get_logger
+from .shared import load_devices, save_devices, get_devices_lock
 
 log = get_logger(__name__)
 
 device_bp = Blueprint("device", __name__)
+
+# 文件读写锁，保护devices.json并发写入
+_devices_lock = get_devices_lock()
 
 _data_dir = ""
 _devices_file = ""
@@ -29,16 +34,16 @@ def init_device_blueprint(data_dir, devices_file, project_root):
 
 
 def _load_devices():
-    if os.path.exists(_devices_file):
-        with open(_devices_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+    return load_devices(_devices_file)
 
 
 def _save_devices(devices):
-    os.makedirs(os.path.dirname(_devices_file), exist_ok=True)
-    with open(_devices_file, "w", encoding="utf-8") as f:
-        json.dump(devices, f, indent=2, ensure_ascii=False)
+    with _devices_lock:
+        os.makedirs(os.path.dirname(_devices_file), exist_ok=True)
+        _tmp = _devices_file + ".tmp"
+        with open(_tmp, "w", encoding="utf-8") as f:
+            json.dump(devices, f, indent=2, ensure_ascii=False)
+        os.replace(_tmp, _devices_file)
 
 
 @device_bp.route("/api/devices", methods=["GET"])
@@ -109,6 +114,18 @@ def _add_single_device(data):
                                     "success": False,
                                     "message": f"设备 {ip}:{port} 已存在",
                                 }
+                        # 验证连通性
+                        if conn_type != "serial":
+                            import socket as _sock_mod
+                            try:
+                                _s = _sock_mod.socket(_sock_mod.AF_INET, _sock_mod.SOCK_STREAM)
+                                _s.settimeout(5)
+                                _r = _s.connect_ex((ip, int(port)))
+                                _s.close()
+                                if _r != 0:
+                                    return {"success": False, "message": f"连接失败：{ip}:{port} 不可达，请检查IP和端口"}
+                            except Exception as e:
+                                return {"success": False, "message": f"连接测试出错：{e}"}
                         d["ip"] = ip
                         d["port"] = int(port)
                     d["vendor"] = vendor
@@ -138,6 +155,19 @@ def _add_single_device(data):
         if detected:
             vendor = detected.get("vendor", vendor)
             remark = remark or detected.get("hostname", "")
+
+    # 验证连通性：TCP端口是否可达（serial跳过）
+    if conn_type != "serial" and ip:
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((ip, int(port)))
+            sock.close()
+            if result != 0:
+                return {"success": False, "message": f"连接失败：{ip}:{port} 不可达，请检查IP和端口"}
+        except Exception as e:
+            return {"success": False, "message": f"连接测试出错：{e}"}
 
     device_id = f"dev_{int(time.time() * 1000)}"
     device = {

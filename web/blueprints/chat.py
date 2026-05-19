@@ -9,6 +9,8 @@ import os
 import re
 import time
 
+from .shared import load_devices as _shared_load_devices
+
 chat_bp = Blueprint("chat", __name__)
 
 _data_dir = ""
@@ -36,10 +38,7 @@ def init_chat_blueprint(data_dir, devices_file, project_root):
 
 
 def _load_devices():
-    if os.path.exists(_devices_file):
-        with open(_devices_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+    return _shared_load_devices(_devices_file)
 
 
 # 设备列表缓存（避免每次 chat 都重读+重新格式化）

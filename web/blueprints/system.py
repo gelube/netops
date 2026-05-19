@@ -238,9 +238,11 @@ def api_exec():
         )
 
     try:
+        # shell=False + shlex.split prevents shell injection
+        import shlex
         result = subprocess.run(
-            command,
-            shell=True,
+            shlex.split(command),
+            shell=False,
             capture_output=True,
             text=True,
             timeout=30,

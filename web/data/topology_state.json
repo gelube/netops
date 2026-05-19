@@ -1,87 +1,94 @@
 {
   "nodes": [
     {
-      "id": "dev_1778993309156",
-      "name": "SW1",
-      "label": "SW1",
-      "remark": "SW1",
+      "id": "dev_1779098566401",
+      "name": "接入交换机",
+      "remark": "接入交换机",
       "ip": "127.0.0.1",
-      "vendor": "h3c",
-      "deviceType": "router",
-      "x": 398.91304347826014,
-      "y": 144.79818464466004,
+      "deviceType": "layer2_switch",
+      "x": 40,
+      "y": 40,
       "facts": {
-        "model": "S685",
-        "version_output": "display version\nH3C Comware Software, Version 7.1.070, Alpha 7170\nCopyright (c) 2004-2022 New H3C Technologies Co., Ltd. All rights reserved.\nH3C S6850 uptime is 0 weeks, 0 days, 6 hours, 31 minutes\nLast reboot reason: User reboot\nBoot image: flash:/s6850-cmw710-boot-t7064p15.bin\nBoot image version: 7.1.070, Alpha 7170\n  Compiled Nov 21 2022 11:00:00\nBoot image: flash:/s6850-cmw710-system-t7064p15.bin\nBoot image version: 7.1.070, Alpha 7170\n  Compiled Nov 21 2022 11:00:00\n\nSlot 1:\nS6850 with 2 Processors\nBOARD TYPE: S6850\nDRAM:  512M bytes\nFLASH: 1024M bytes\nPCB 1 Version: VER.C\nBootrom Version: 908\nCPLD 1 Version: 002\nCPLD 2 Version: 002\nRelease Version: H3C S6850\nPatch Version: None\nReboot Cause: User reboot\n---- More ----",
-        "hostname": "H3C"
-      }
+        "hostname": "H3C",
+        "last_collected": "2026-05-19T14:30:01.914501"
+      },
+      "lldp_status": "enabled"
     },
     {
-      "id": "dev_1778993309159",
-      "name": "SW2",
-      "label": "SW2",
-      "remark": "SW2",
+      "id": "dev_1779098580000",
+      "name": "核心交换机",
+      "remark": "核心交换机",
       "ip": "127.0.0.1",
-      "vendor": "h3c",
       "deviceType": "layer3_switch",
-      "x": 399.9999999999997,
-      "y": 390.8317358710658,
+      "x": 393,
+      "y": 121,
       "facts": {
-        "model": "S685",
-        "version_output": "display version\nH3C Comware Software, Version 7.1.070, Alpha 7170\nCopyright (c) 2004-2022 New H3C Technologies Co., Ltd. All rights reserved.\nH3C S6850 uptime is 0 weeks, 0 days, 5 hours, 35 minutes\nLast reboot reason: User reboot\nBoot image: flash:/s6850-cmw710-boot-t7064p15.bin\nBoot image version: 7.1.070, Alpha 7170\n  Compiled Nov 21 2022 11:00:00\nBoot image: flash:/s6850-cmw710-system-t7064p15.bin\nBoot image version: 7.1.070, Alpha 7170\n  Compiled Nov 21 2022 11:00:00\n\nSlot 1:\nS6850 with 2 Processors\nBOARD TYPE: S6850\nDRAM:  512M bytes\nFLASH: 1024M bytes\nPCB 1 Version: VER.C\nBootrom Version: 908\nCPLD 1 Version: 002\nCPLD 2 Version: 002\nRelease Version: H3C S6850\nPatch Version: None\nReboot Cause: User reboot\n---- More ----",
-        "hostname": "H3C"
-      }
+        "hostname": "H3C",
+        "last_collected": "2026-05-19T14:29:41.972914"
+      },
+      "lldp_status": "enabled"
     },
     {
-      "id": "dev_1779007247489",
-      "name": "出口路由",
-      "label": "出口路由",
-      "remark": "出口路由",
+      "id": "dev_1779098594401",
+      "name": "出口路",
+      "remark": "出口路",
       "ip": "127.0.0.1",
-      "vendor": "h3c",
       "deviceType": "router",
-      "x": 661.9565217391303,
-      "y": 141.5439925277523,
+      "x": 730,
+      "y": 40,
       "facts": {
-        "model": "w710",
-        "version_output": "\n[H3C]\n[H3C]show version\nH3C Comware Software, Version 7.1.075, ESS 8305\nCopyright (c) 2004-2022 New H3C Technologies Co., Ltd. All rights reserved.\nH3C MSR36-20 uptime is 0 weeks, 0 days, 0 hours, 2 minutes\nLast reboot reason: User reboot\nBoot image: flash:/vsr88-cmw710-boot-a7514.bin\nBoot image version: 7.1.075, ESS 8305\n  Compiled Oct 26 2022 11:00:00\nBoot image: flash:/vsr88-cmw710-system-a7514.bin\nBoot image version: 7.1.075, ESS 8305\n  Compiled Oct 26 2022 11:00:00\n\nCPU ID: 0x2\n768M bytes DDR3 SDRAM Memory\n1024M bytes Flash Memory\nPCB               Version:  2.0\nCPLD              Version:  1.0\nBasic    BootWare Version:  1.42\nExtended BootWare Version:  1.42\n\n[H3C]"
-      }
+        "hostname": "H3C",
+        "last_collected": "2026-05-19T14:30:01.976812"
+      },
+      "lldp_status": "enabled"
     }
   ],
   "links": [
     {
-      "from": "dev_1778993309156",
-      "to": "dev_1778993309159",
+      "from": "dev_1779098566401",
+      "from_name": "接入交换机",
+      "from_port": "GE1/0/1",
       "id": "link_1",
-      "from_name": "SW1",
-      "to_name": "SW2",
-      "from_port": "GE1/0/2",
-      "to_port": "GE1/0/1",
+      "last_seen": "2026-05-19T14:30:01.345958",
       "link_type": "unknown",
-      "protocol": "lldp"
+      "lost_at": null,
+      "protocol": "lldp",
+      "source": "lldp",
+      "status": "active",
+      "to": "dev_1779098580000",
+      "to_name": "核心交换机",
+      "to_port": "GigabitEthernet1/0/1"
     },
     {
-      "from": "dev_1778993309156",
-      "to": "dev_1778993309159",
+      "from": "dev_1779098566401",
+      "from_name": "接入交换机",
+      "from_port": "GE1/0/2",
       "id": "link_2",
-      "from_name": "SW1",
-      "to_name": "SW2",
-      "from_port": "GE1/0/3",
-      "to_port": "GE1/0/3",
+      "last_seen": "2026-05-19T14:30:01.345958",
       "link_type": "unknown",
-      "protocol": "lldp"
+      "lost_at": null,
+      "protocol": "lldp",
+      "source": "lldp",
+      "status": "active",
+      "to": "dev_1779098580000",
+      "to_name": "核心交换机",
+      "to_port": "GigabitEthernet1/0/3"
     },
     {
-      "from": "dev_1778993309159",
-      "to": "dev_1779007247489",
-      "id": "link_3",
-      "from_name": "SW2",
-      "to_name": "出口路由",
+      "from": "dev_1779098580000",
+      "from_name": "核心交换机",
       "from_port": "GE1/0/2",
-      "to_port": "GE0/0/0",
+      "id": "link_3",
+      "last_seen": "2026-05-19T14:30:01.345958",
       "link_type": "unknown",
-      "protocol": "lldp"
+      "lost_at": null,
+      "protocol": "lldp",
+      "source": "lldp",
+      "status": "active",
+      "to": "dev_1779098594401",
+      "to_name": "出口路",
+      "to_port": "GigabitEthernet0/0/0"
     }
   ],
-  "version": 1544
+  "version": 380
 }

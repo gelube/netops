@@ -10,3 +10,11 @@ backups/
 venv/
 netbrain-mcp/
 web/server.log
+
+# Sensitive runtime data
+sessions/
+snapshots/
+topology_state.json
+
+# Legacy scripts (not tracked)
+archive/

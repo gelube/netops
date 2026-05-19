@@ -41,22 +41,39 @@ class NetOpsTools:
             json.dump(devices, f, indent=2, ensure_ascii=False)
 
     def _skip_auto_config(self, conn, vendor):
-        """跳过 H3C/Huawei 'Automatic configuration is running' 提示"""
-        if vendor not in ('h3c', 'huawei'):
+        """跳过 H3C/Huawei 'Automatic configuration is running' 提示
+        先发多次Ctrl+C，如果还没回到提示符则发Ctrl+D
+        """
+        if vendor not in ('h3c', 'huawei', 'auto'):
             return
         try:
-            for _ in range(3):
-                conn.write_channel('\x03')
+            got_prompt = False
+            # 尝试Ctrl+C（最多5次）
+            for i in range(5):
+                conn.write_channel('\x03')  # Ctrl+C
                 time.sleep(1)
                 buf = conn.read_channel()
-                if '<' in buf or '[' in buf or 'aborted' in buf.lower():
+                if '<' in buf or '[' in buf or 'aborted' in buf.lower() or '>' in buf:
+                    got_prompt = True
                     break
-            conn.write_channel('\n')
-            time.sleep(1)
-            conn.read_channel()
+            # Ctrl+C不行，试Ctrl+D
+            if not got_prompt:
+                for i in range(3):
+                    conn.write_channel('\x04')  # Ctrl+D
+                    time.sleep(1)
+                    buf = conn.read_channel()
+                    if '<' in buf or '[' in buf or 'aborted' in buf.lower() or '>' in buf:
+                        got_prompt = True
+                        break
+            # 清理残留输出，确认提示符
+            if got_prompt:
+                conn.write_channel('\n')
+                time.sleep(1)
+                conn.read_channel()
+            else:
+                log.warning(f"_skip_auto_config: failed to get prompt after Ctrl+C/D")
         except Exception as e:
-            log.debug("跳过启动提示失败", error=str(e))
-            pass
+            log.debug("skip auto-config failed", error=str(e))
 
     def execute_tool(self, tool_name, arguments):
         """执行工具调用"""
@@ -557,12 +574,8 @@ class NetOpsTools:
             results = []
             with ConnectHandler(**conn_params) as conn:
                 # H3C/Huawei 免凭证：中断 auto-config 提示
-                if not username and not password and vendor in ("h3c", "huawei"):
-                    conn.write_channel("\x03")  # Ctrl+C
-                    time.sleep(2)
-                    conn.write_channel("\n")   # Enter to get prompt
-                    time.sleep(1)
-                    conn.read_channel()  # 丢弃 auto-config 提示
+                if not username and not password and vendor in ("h3c", "huawei", "auto"):
+                    self._skip_auto_config(conn, vendor)
 
                 for cmd in commands:
                     if not username and not password:
