@@ -225,6 +225,7 @@ class LLMClient:
         tools: list = None,
         temperature: float = 0.7,
         timeout: int = 30,
+        tool_choice: str = "auto",
     ) -> dict:
         """
         完整对话接口 — 支持 function calling / tool use
@@ -313,6 +314,7 @@ class LLMClient:
                 }
                 if tools:
                     kwargs["tools"] = tools
+                    kwargs["tool_choice"] = tool_choice
 
                 response = client.chat.completions.create(**kwargs)
                 choice = response.choices[0]

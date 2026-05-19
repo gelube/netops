@@ -8,8 +8,11 @@ import json
 import os
 import re
 import time
+import logging
 
 from .shared import load_devices as _shared_load_devices
+
+log = logging.getLogger(__name__)
 
 chat_bp = Blueprint("chat", __name__)
 
@@ -340,30 +343,49 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
     devices = _load_devices()
     device_list_str = _get_device_list_str()
 
-    system_prompt = f"""你是一个网络运维助手，帮助用户管理网络设备。
+    system_prompt = f"""你是网络运维助手。当前选中设备：{selected_device or "未选择"}。
+可用设备：{device_list_str}
 
-可用设备：
-{device_list_str}
-
-当前选中设备：{selected_device or "未选择"}
-
-你可以使用以下工具：
-{json.dumps(get_tools_definition(), ensure_ascii=False, indent=2)}
+重要：当前已选中设备时，直接对该设备执行命令，不要再询问用户选择设备。
+直接调用 run_commands 工具，参数示例：
+- 用户说"查看版本"→ run_commands(device="{selected_device or '设备名'}", commands=["display version"])
+- 用户说"显示接口"→ run_commands(device="{selected_device or '设备名'}", commands=["display interface brief"])
+- 用户说"创建VLAN 100"→ run_commands(device="{selected_device or '设备名'}", commands=["system-view","vlan 100","quit"])
 
 规则：
-1. 执行命令前先确认设备名
-2. 配置命令需要用户确认
-3. 危险操作（重启、删除配置等）必须警告
-4. 优先使用只读命令了解状态
+1. 已选中设备时直接执行，不要确认
+2. 配置命令（非display/show/save/ping/traceroute）需要预览确认
+3. 危险操作（重启、删除配置）必须警告
+4. 华为/华三用display，思科用show
 """
+
+    # 如果已选中设备，在用户消息中附加设备信息，确保LLM能识别
+    if selected_device:
+        message = f"[当前设备：{selected_device}] {message}"
 
     # 构建消息列表
     messages = [{"role": "system", "content": system_prompt}]
     for turn in session.turns[-20:]:  # 最近20轮
         messages.append({"role": turn.role.value, "content": turn.content})
 
-    # 调用LLM
-    response = llm.chat(messages=messages, tools=get_tools_definition())
+    # 调用LLM — 检测是否需要强制工具调用
+    _ACTION_KEYWORDS = (
+        '查看', '显示', '执行', '运行', '配置', '创建', '删除', '修改',
+        'display', 'show', 'ping', 'traceroute', '版本', '接口', '路由',
+        'vlan', 'arp', 'mac', 'lldp', 'ospf', 'bgp', 'cpu', '内存',
+        '重启', '关闭', '开启', '备份', '恢复', '诊断',
+    )
+    # 纯聊天关键词（不用工具）
+    _CHAT_KEYWORDS = ('你好', '谢谢', '你是谁', '什么', '为什么', '怎么', '如何', '帮我', '解释', '区别')
+    is_pure_chat = any(message.strip().startswith(kw) for kw in _CHAT_KEYWORDS) and not any(kw in message for kw in _ACTION_KEYWORDS)
+    
+    if selected_device and not is_pure_chat and any(kw in message for kw in _ACTION_KEYWORDS):
+        tool_choice = "required"
+    else:
+        tool_choice = "auto"
+    log.info(f"LLM chat: tool_choice={tool_choice}, device={selected_device}")
+
+    response = llm.chat(messages=messages, tools=get_tools_definition(), tool_choice=tool_choice)
 
     # 处理工具调用
     if isinstance(response.get("tool_calls"), list) and response.get("tool_calls"):
@@ -426,7 +448,65 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
                     )
                     continue
 
-            # 非命令类工具（如 get_devices）— 预览模式也执行（只读）
+            # 非命令类工具（如 list_devices）— 如果消息有命令意图，自动补 run_commands
+            if tool_name == "list_devices" and selected_device and any(kw in message for kw in _ACTION_KEYWORDS):
+                # LLM误选了list_devices，用命令模板匹配
+                _QUERY_MAP = {
+                    "版本": "display version",
+                    "vlan": "display vlan",
+                    "路由": "display ip routing-table",
+                    "arp": "display arp",
+                    "接口": "display interface brief",
+                    "mac": "display mac-address",
+                    "配置": "display current-configuration",
+                    "cpu": "display cpu-usage",
+                    "内存": "display memory",
+                    "日志": "display logbuffer",
+                    "邻居": "display lldp neighbor-information list",
+                    "告警": "display alarm",
+                }
+                matched_cmd = None
+                _CMD_PREFIXES = ("display ", "show ", "save", "ping ", "traceroute")
+                if any(message.lower().startswith(p) for p in _CMD_PREFIXES):
+                    matched_cmd = message.split("\n")[0].strip()
+                else:
+                    for kw, cmd in _QUERY_MAP.items():
+                        if kw in message:
+                            matched_cmd = cmd
+                            break
+                if matched_cmd:
+                    # 覆盖为 run_commands
+                    tool_name = "run_commands"
+                    arguments = {"device": selected_device, "commands": [matched_cmd]}
+                    # 走下面的 run_commands 逻辑
+                    commands = [matched_cmd]
+                    dev_name = selected_device
+                    _READ_ONLY_PREFIXES = ("display ", "show ", "save", "ping ", "traceroute")
+                    all_readonly = any(cmd.lower().strip().startswith(p) for p in _READ_ONLY_PREFIXES for cmd in commands)
+                    if all_readonly and not preview_only:
+                        dev = None
+                        for d in devices:
+                            if d.get("name") == dev_name or d.get("remark") == dev_name or d.get("ip") == dev_name:
+                                dev = d
+                                break
+                        if dev:
+                            dev_info = CommandService.device_from_dict(dev)
+                            cmd_result = cmd_svc.execute(dev_info, commands, user_id=session_id, source="llm")
+                            if cmd_result.success:
+                                results.append({"tool": "run_commands", "result": {"success": True, "results": cmd_result.outputs, "backup_id": cmd_result.backup_id}})
+                                continue
+                            else:
+                                results.append({"tool": "run_commands", "error": cmd_result.error})
+                                continue
+                    planned_commands.append({"device": dev_name, "commands": commands})
+                    continue
+                else:
+                    # 没匹配到命令，正常执行 list_devices
+                    tool_result = tools.execute_tool(tool_name, arguments)
+                    results.append({"tool": tool_name, "result": tool_result})
+                    continue
+
+            # 其他非命令类工具
             tool_result = tools.execute_tool(tool_name, arguments)
             results.append({"tool": tool_name, "result": tool_result})
 

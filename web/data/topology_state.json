@@ -7,12 +7,7 @@
       "ip": "127.0.0.1",
       "deviceType": "layer2_switch",
       "x": 40,
-      "y": 40,
-      "facts": {
-        "hostname": "H3C",
-        "last_collected": "2026-05-19T14:30:01.914501"
-      },
-      "lldp_status": "enabled"
+      "y": 40
     },
     {
       "id": "dev_1779098580000",
@@ -21,12 +16,7 @@
       "ip": "127.0.0.1",
       "deviceType": "layer3_switch",
       "x": 393,
-      "y": 121,
-      "facts": {
-        "hostname": "H3C",
-        "last_collected": "2026-05-19T14:29:41.972914"
-      },
-      "lldp_status": "enabled"
+      "y": 121
     },
     {
       "id": "dev_1779098594401",
@@ -35,12 +25,7 @@
       "ip": "127.0.0.1",
       "deviceType": "router",
       "x": 730,
-      "y": 40,
-      "facts": {
-        "hostname": "H3C",
-        "last_collected": "2026-05-19T14:31:43.774738"
-      },
-      "lldp_status": "enabled"
+      "y": 40
     }
   ],
   "links": [
@@ -75,5 +60,5 @@
       "to_port": "GigabitEthernet0/0/0"
     }
   ],
-  "version": 382
+  "version": 384
 }
