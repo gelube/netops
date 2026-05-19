@@ -953,11 +953,18 @@ def topology_discover():
     state["version"] = int(state.get("version", 1)) + 1
     _save_topology_state(state)
 
-    # 清理临时标记
+    # 清理临时标记，更新last_collected（discover成功连接的设备视为在线）
+    from datetime import datetime
     for d in devices:
+        _was_offline = d.get("_lldp_status", "") == "offline"
         d.pop("_lldp_status", None)
+        # LLDP采集成功的设备（非offline跳过）说明连接正常
+        if not _was_offline:
+            if not d.get("facts"):
+                d["facts"] = {}
+            d["facts"]["last_collected"] = datetime.now().isoformat()
 
-    # 写回devices.json前，重新读取文件合并可能被ping更新的last_collected
+    # 写回devices.json前，合并ping更新的last_collected（取较新的）
     try:
         _fresh_devices = _load_devices()
         _fresh_map = {(fd.get('remark') or fd.get('name','')): fd for fd in _fresh_devices}
@@ -965,9 +972,12 @@ def topology_discover():
             _fname = d.get('remark') or d.get('name','')
             _fd = _fresh_map.get(_fname)
             if _fd and _fd.get('facts', {}).get('last_collected'):
-                if not d.get('facts'):
-                    d['facts'] = {}
-                d['facts']['last_collected'] = _fd['facts']['last_collected']
+                _fresh_ts = _fd['facts']['last_collected']
+                _cur_ts = d.get('facts', {}).get('last_collected', '')
+                if _fresh_ts > _cur_ts:  # 文件里的时间更新时才覆盖
+                    if not d.get('facts'):
+                        d['facts'] = {}
+                    d['facts']['last_collected'] = _fresh_ts
     except Exception as e:
         log.debug(f"discover: skip merge last_collected: {e}")
 

@@ -12,7 +12,7 @@
     "device_type": "layer2_switch",
     "facts": {
       "hostname": "H3C",
-      "last_collected": "2026-05-19T14:30:01.914501"
+      "last_collected": "2026-05-19T15:42:20.212387"
     },
     "lldp_neighbors": [
       {
@@ -39,7 +39,7 @@
     "device_type": "layer3_switch",
     "facts": {
       "hostname": "H3C",
-      "last_collected": "2026-05-19T14:29:41.972914"
+      "last_collected": "2026-05-19T15:42:20.212403"
     },
     "lldp_neighbors": [
       {
@@ -62,18 +62,18 @@
   },
   {
     "id": "dev_1779098594401",
-    "name": "出口路",
+    "name": "出口路由",
     "ip": "127.0.0.1",
     "port": 30003,
     "username": "",
     "password": "",
     "vendor": "auto",
     "conn_type": "telnet",
-    "remark": "出口路",
+    "remark": "出口路由",
     "device_type": "router",
     "facts": {
       "hostname": "H3C",
-      "last_collected": "2026-05-19T14:31:43.774738"
+      "last_collected": "2026-05-19T15:42:20.212408"
     },
     "lldp_neighbors": [
       {

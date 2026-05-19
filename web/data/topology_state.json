@@ -7,7 +7,10 @@
       "ip": "127.0.0.1",
       "deviceType": "layer2_switch",
       "x": 40,
-      "y": 40
+      "y": 40,
+      "facts": {
+        "last_collected": "2026-05-19T15:42:20.212387"
+      }
     },
     {
       "id": "dev_1779098580000",
@@ -16,16 +19,22 @@
       "ip": "127.0.0.1",
       "deviceType": "layer3_switch",
       "x": 393,
-      "y": 121
+      "y": 121,
+      "facts": {
+        "last_collected": "2026-05-19T15:42:20.212403"
+      }
     },
     {
       "id": "dev_1779098594401",
-      "name": "出口路",
-      "remark": "出口路",
+      "name": "出口路由",
+      "remark": "出口路由",
       "ip": "127.0.0.1",
       "deviceType": "router",
       "x": 730,
-      "y": 40
+      "y": 40,
+      "facts": {
+        "last_collected": "2026-05-19T15:42:20.212408"
+      }
     }
   ],
   "links": [
@@ -34,7 +43,7 @@
       "from_name": "接入交换机",
       "from_port": "GE1/0/1",
       "id": "link_1",
-      "last_seen": "2026-05-19T14:31:37.345310",
+      "last_seen": "2026-05-19T15:42:20.206434",
       "link_type": "unknown",
       "lost_at": null,
       "protocol": "lldp",
@@ -49,7 +58,7 @@
       "from_name": "核心交换机",
       "from_port": "GE1/0/2",
       "id": "link_2",
-      "last_seen": "2026-05-19T14:31:37.345310",
+      "last_seen": "2026-05-19T15:42:20.206434",
       "link_type": "unknown",
       "lost_at": null,
       "protocol": "lldp",
@@ -60,5 +69,5 @@
       "to_port": "GigabitEthernet0/0/0"
     }
   ],
-  "version": 384
+  "version": 409
 }

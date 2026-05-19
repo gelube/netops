@@ -22,6 +22,99 @@ _project_root = ""
 _session_mgr = None  # 模块级SessionManager单例
 
 
+def _match_device(devices, dev_name):
+    """Match device by exact name, then by substring containment"""
+    if not dev_name:
+        return None
+    # Exact match first
+    for d in devices:
+        if d.get("name") == dev_name or d.get("remark") == dev_name or d.get("ip") == dev_name:
+            return d
+    # Substring match: LLM name contains device name or vice versa
+    for d in devices:
+        dn = d.get("name", "")
+        dr = d.get("remark", "")
+        if (dn and (dn in dev_name or dev_name in dn)) or (dr and (dr in dev_name or dev_name in dr)):
+            return d
+    return None
+
+
+# 配置意图 -> 命令映射（当LLM不能正确生成tool_calls时使用）
+_CONFIG_MAP = [
+    # (关键词列表, 命令模板)
+    (['关闭lldp', '禁用lldp', '停用lldp'], 'system-view\nundo lldp global enable'),
+    (['开启lldp', '启用lldp'], 'system-view\nlldp global enable'),
+    (['保存配置', '保存'], 'save force'),
+    (['重启设备', '重启'], 'reboot'),
+]
+
+
+def _match_config_command(message):
+    """Try to match a config intent from the message when LLM returns text instead of tool_calls.
+    Returns a command string if matched, None otherwise.
+    """
+    msg_lower = message.lower().strip()
+    
+    # 1. Simple keyword-based mapping
+    for keywords, cmd_template in _CONFIG_MAP:
+        if any(kw in msg_lower for kw in keywords):
+            return cmd_template
+    
+    # 2. "关闭GE1/0/1" -> system-view + interface + shutdown
+    port_match = re.search(r'(?:关闭|shutdown)\s*(?:接口|端口)?\s*([GEgi][Ei]?\s*\d+/\d+/\d+)', message, re.IGNORECASE)
+    if port_match:
+        port = port_match.group(1).replace(' ', '').replace('GE', 'GigabitEthernet').replace('ge', 'GigabitEthernet').replace('Gi', 'GigabitEthernet')
+        return f"system-view\ninterface {port}\nshutdown"
+    
+    # 3. "开启GE1/0/1" -> undo shutdown
+    port_match = re.search(r'(?:开启|undo\s+shutdown)\s*(?:接口|端口)?\s*([GEgi][Ei]?\s*\d+/\d+/\d+)', message, re.IGNORECASE)
+    if port_match:
+        port = port_match.group(1).replace(' ', '').replace('GE', 'GigabitEthernet').replace('ge', 'GigabitEthernet').replace('Gi', 'GigabitEthernet')
+        return f"system-view\ninterface {port}\nundo shutdown"
+    
+    # 4. "创建VLAN X"
+    vlan_match = re.search(r'创建\s*(?:VLAN|vlan)\s*(\d+)', message, re.IGNORECASE)
+    if vlan_match:
+        vid = vlan_match.group(1)
+        return f"system-view\nvlan {vid}"
+    
+    # 5. "删除VLAN X"
+    vlan_match = re.search(r'删除\s*(?:VLAN|vlan)\s*(\d+)', message, re.IGNORECASE)
+    if vlan_match:
+        vid = vlan_match.group(1)
+        return f"system-view\nundo vlan {vid}"
+    
+    # 6. "把GE1/0/1划入VLAN 10"
+    port_vlan = re.search(r'([GEgi][Ei]?\s*\d+/\d+/\d+).*?(?:划入|加入|分配到|放到)\s*(?:VLAN|vlan)\s*(\d+)', message, re.IGNORECASE)
+    if port_vlan:
+        port = port_vlan.group(1).replace(' ', '').replace('GE', 'GigabitEthernet').replace('ge', 'GigabitEthernet').replace('Gi', 'GigabitEthernet')
+        vid = port_vlan.group(2)
+        return f"system-view\ninterface {port}\nport access vlan {vid}"
+    
+    # 7. "GE1/0/1改成access口"
+    port_type = re.search(r'([GEgi][Ei]?\s*\d+/\d+/\d+).*?改成?\s*(access|trunk)', message, re.IGNORECASE)
+    if port_type:
+        port = port_type.group(1).replace(' ', '').replace('GE', 'GigabitEthernet').replace('ge', 'GigabitEthernet').replace('Gi', 'GigabitEthernet')
+        ptype = port_type.group(2).lower()
+        return f"system-view\ninterface {port}\nport link-type {ptype}"
+    
+    # 8. "给GE1/0/1加描述xxx"
+    port_desc = re.search(r'(?:给|为)?\s*([GEgi][Ei]?\s*\d+/\d+/\d+).*?(?:加描述|设置描述|描述为|description)\s*(.+)', message, re.IGNORECASE)
+    if port_desc:
+        port = port_desc.group(1).replace(' ', '').replace('GE', 'GigabitEthernet').replace('ge', 'GigabitEthernet').replace('Gi', 'GigabitEthernet')
+        desc = port_desc.group(2).strip()
+        return f"system-view\ninterface {port}\ndescription {desc}"
+    
+    # 9. "设置GE1/0/1的IP为x.x.x.x/y"
+    port_ip = re.search(r'(?:设置|配置)?\s*([GEgi][Ei]?\s*\d+/\d+/\d+).*?(?:IP|ip|地址).*?(\d+\.\d+\.\d+\.\d+/\d+)', message, re.IGNORECASE)
+    if port_ip:
+        port = port_ip.group(1).replace(' ', '').replace('GE', 'GigabitEthernet').replace('ge', 'GigabitEthernet').replace('Gi', 'GigabitEthernet')
+        ip_mask = port_ip.group(2)
+        return f"system-view\ninterface {port}\nport link-type route\nipv4 address {ip_mask}"
+    
+    return None
+
+
 def _get_session_mgr():
     """获取SessionManager单例，避免每次请求new"""
     global _session_mgr
@@ -351,12 +444,17 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
 - 用户说"查看版本"→ run_commands(device="{selected_device or '设备名'}", commands=["display version"])
 - 用户说"显示接口"→ run_commands(device="{selected_device or '设备名'}", commands=["display interface brief"])
 - 用户说"创建VLAN 100"→ run_commands(device="{selected_device or '设备名'}", commands=["system-view","vlan 100","quit"])
+- 用户说"关闭LLDP"→ run_commands(device="{selected_device or '设备名'}", commands=["system-view","undo lldp global enable"])
+- 用户说"开启LLDP"→ run_commands(device="{selected_device or '设备名'}", commands=["system-view","lldp global enable"])
+- 用户说"重启设备"→ run_commands(device="{selected_device or '设备名'}", commands=["reboot"])
+- 用户说"保存配置"→ run_commands(device="{selected_device or '设备名'}", commands=["save force"])
 
 规则：
 1. 已选中设备时直接执行，不要确认
-2. 配置命令（非display/show/save/ping/traceroute）需要预览确认
+2. 配置命令（system-view/undo/接口配置等）需要走run_commands工具
 3. 危险操作（重启、删除配置）必须警告
 4. 华为/华三用display，思科用show
+5. 配置操作必须包含system-view，不要只发display查看
 """
 
     # 如果已选中设备，在用户消息中附加设备信息，确保LLM能识别
@@ -370,13 +468,15 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
 
     # 调用LLM — 检测是否需要强制工具调用
     _ACTION_KEYWORDS = (
-        '查看', '显示', '执行', '运行', '配置', '创建', '删除', '修改',
+        '查看', '显示', '执行', '运行', '配置', '创建', '删除', '修改', '改成',
         'display', 'show', 'ping', 'traceroute', '版本', '接口', '路由',
         'vlan', 'arp', 'mac', 'lldp', 'ospf', 'bgp', 'cpu', '内存',
-        '重启', '关闭', '开启', '备份', '恢复', '诊断',
+        '重启', '关闭', '开启', '备份', '恢复', '诊断', '改', '加', '设',
     )
     # 纯聊天关键词（不用工具）
     _CHAT_KEYWORDS = ('你好', '谢谢', '你是谁', '什么', '为什么', '怎么', '如何', '帮我', '解释', '区别')
+
+
     is_pure_chat = any(message.strip().startswith(kw) for kw in _CHAT_KEYWORDS) and not any(kw in message for kw in _ACTION_KEYWORDS)
     
     if selected_device and not is_pure_chat and any(kw in message for kw in _ACTION_KEYWORDS):
@@ -404,23 +504,23 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
                 commands = arguments.get("commands", [])
                 dev_name = arguments.get("device", "")
                 if commands:
-                    # 判断是否为只读命令（display/show/save/ping/traceroute）
-                    _READ_ONLY_PREFIXES = ("display ", "show ", "save", "ping ", "traceroute")
+                    # 判断是否为只读命令（display/show/ping/traceroute）
+                    # 注意：save需要Y/N确认，不属于只读
+                    # 意图校验：如果用户意图是配置操作但LLM生成了查看命令，用意图映射覆盖
+                    _config_intent = _match_config_command(message)
+                    if _config_intent and _config_intent != commands:
+                        # LLM没理解配置意图，用映射命令覆盖
+                        log.info(f"Intent override: LLM={commands}, mapped={_config_intent}")
+                        commands = _config_intent.split("\n")
+                    
+                    _READ_ONLY_PREFIXES = ("display ", "show ", "ping ", "traceroute", "tracert ")
                     all_readonly = all(
                         any(cmd.lower().strip().startswith(p) for p in _READ_ONLY_PREFIXES)
                         for cmd in commands
                     )
                     if all_readonly and not preview_only:
                         # 只读命令：直接执行，秒回
-                        dev = None
-                        for d in devices:
-                            if (
-                                d.get("name") == dev_name
-                                or d.get("remark") == dev_name
-                                or d.get("ip") == dev_name
-                            ):
-                                dev = d
-                                break
+                        dev = _match_device(devices, dev_name)
                         if dev:
                             dev_info = CommandService.device_from_dict(dev)
                             cmd_result = cmd_svc.execute(
@@ -453,8 +553,11 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
                 # LLM误选了list_devices，用命令模板匹配
                 _QUERY_MAP = {
                     "版本": "display version",
+                    "运行时间": "display version",
+                    "启动时间": "display version",
                     "vlan": "display vlan",
                     "路由": "display ip routing-table",
+                    "路由表": "display ip routing-table",
                     "arp": "display arp",
                     "接口": "display interface brief",
                     "mac": "display mac-address",
@@ -464,6 +567,15 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
                     "日志": "display logbuffer",
                     "邻居": "display lldp neighbor-information list",
                     "告警": "display alarm",
+                    "ospf": "display ospf peer",
+                    "bgp": "display bgp peer",
+                    "stp": "display stp",
+                    "nat": "display nat session",
+                    "acl": "display acl",
+                    "环境": "display environment",
+                    "风扇": "display fan",
+                    "电源": "display power",
+                    "流量": "display interface",
                 }
                 matched_cmd = None
                 _CMD_PREFIXES = ("display ", "show ", "save", "ping ", "traceroute")
@@ -481,14 +593,10 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
                     # 走下面的 run_commands 逻辑
                     commands = [matched_cmd]
                     dev_name = selected_device
-                    _READ_ONLY_PREFIXES = ("display ", "show ", "save", "ping ", "traceroute")
+                    _READ_ONLY_PREFIXES = ("display ", "show ", "ping ", "traceroute", "tracert ")
                     all_readonly = any(cmd.lower().strip().startswith(p) for p in _READ_ONLY_PREFIXES for cmd in commands)
                     if all_readonly and not preview_only:
-                        dev = None
-                        for d in devices:
-                            if d.get("name") == dev_name or d.get("remark") == dev_name or d.get("ip") == dev_name:
-                                dev = d
-                                break
+                        dev = _match_device(devices, dev_name)
                         if dev:
                             dev_info = CommandService.device_from_dict(dev)
                             cmd_result = cmd_svc.execute(dev_info, commands, user_id=session_id, source="llm")
@@ -525,9 +633,22 @@ def _do_chat(message, selected_device, session_id="default", preview_only=False)
                 "response": "配置命令预览已生成，请确认后执行",
             }
 
-        # LLM没生成命令工具调用，直接返回文本
+        # LLM没生成命令工具调用，尝试配置命令映射
         if not results:
             content = response.get("content", "")
+            # 尝试用_CONFIG_MAP匹配配置意图
+            if selected_device and any(kw in message for kw in _ACTION_KEYWORDS):
+                config_cmd = _match_config_command(message)
+                if config_cmd:
+                    planned_commands.append({"device": selected_device, "commands": [config_cmd]})
+                    session_mgr.add_turn(session_id, TurnRole.ASSISTANT, f"预览命令: {json.dumps(planned_commands, ensure_ascii=False)}")
+                    return {
+                        "success": True,
+                        "preview": True,
+                        "planned_commands": planned_commands,
+                        "message": f"将执行: {config_cmd}",
+                        "response": f"将执行: {config_cmd}",
+                    }
             session_mgr.add_turn(session_id, TurnRole.ASSISTANT, content)
             return {
                 "success": True,
@@ -686,8 +807,11 @@ def quick_config():
         # 简单自然语言匹配
         _QUERY_MAP = {
             "版本": "display version",
+            "运行时间": "display version",
+            "启动时间": "display version",
             "vlan": "display vlan",
             "路由": "display ip routing-table",
+            "路由表": "display ip routing-table",
             "arp": "display arp",
             "接口": "display interface brief",
             "mac": "display mac-address",
@@ -697,6 +821,15 @@ def quick_config():
             "日志": "display logbuffer",
             "邻居": "display lldp neighbor-information list",
             "告警": "display alarm",
+            "ospf": "display ospf peer",
+            "bgp": "display bgp peer",
+            "stp": "display stp",
+            "nat": "display nat session",
+            "acl": "display acl",
+            "环境": "display environment",
+            "风扇": "display fan",
+            "电源": "display power",
+            "流量": "display interface",
         }
         matched_cmd = None
         # 如果message本身是命令（display/show/save等），直接执行

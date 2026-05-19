@@ -1,6 +1,6 @@
 {
   "provider": "openai",
-  "endpoint": "http://127.0.0.1:1234/v1",
-  "api_key": "",
-  "model": "qwen2.5-coder-7b-instruct"
+  "endpoint": "https://api.lkeap.cloud.tencent.com/plan/v3",
+  "api_key": "gAAAAABqDB4cZyBEPprHScXsWECsXfEoOmgOSlqYbUGmLa7CJReJ9stiSLl1QTYEYan4-3oqdjZIkWepuEGuGcwTw6iOM2U9d8cOQCEYnZNmeib9dLgFSS2lJCSWjqscp-4glo4Br7kn1__nEdSyqwl_BV-9qMSfSA==",
+  "model": "glm-5.1"
 }

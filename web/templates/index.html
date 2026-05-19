@@ -339,7 +339,7 @@
         try {
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 180000);
-          const r = await fetch('/api/topology/discover', { method: 'POST', signal: controller.signal });
+          const r = await fetch('/api/topology/discover', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}), signal: controller.signal });
           clearTimeout(timer);
           const d = await r.json();
           if (d.success) {
@@ -673,7 +673,8 @@
           ip: d.ip || d.serial_port || 'N/A',
           deviceType: d.device_type || 'unknown',
           x: existing?.x,
-          y: existing?.y
+          y: existing?.y,
+          facts: existing?.facts || {}
         };
       });
     }
@@ -1073,7 +1074,7 @@
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 180000); // 3分钟超时
-        const r = await fetch('/api/topology/discover', { method: 'POST', signal: controller.signal });
+        const r = await fetch('/api/topology/discover', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}), signal: controller.signal });
         clearTimeout(timer);
         const d = await r.json();
         if (!d.success) { addMsg('system', '❌ ' + (d.message || '发现失败')); return; }
