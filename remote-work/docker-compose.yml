@@ -1,0 +1,158 @@
+networks:
+  videohub-net:
+    driver: bridge
+    name: videohub-net
+services:
+  admin:
+    container_name: videohub-admin
+    depends_on:
+      api:
+        condition: service_started
+    image: nginx:alpine
+    networks:
+    - videohub-net
+    ports:
+    - ${ADMIN_PORT:-8443}:443
+    restart: unless-stopped
+    volumes:
+    - ./nginx/admin.conf:/etc/nginx/conf.d/default.conf:ro
+    - ./admin:/usr/share/nginx/html:ro
+    - ./ssl:/etc/nginx/ssl:ro
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: videohub-api
+    depends_on:
+      postgres:
+        condition: service_started
+    env_file: .env
+    environment:
+    - HOST=0.0.0.0
+    - PORT=8899
+    - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    - SHLINK_API_KEY=${SHLINK_API_KEY:-}
+    - SHLINK_API_URL=${SHLINK_API_URL:-http://shlink:8080}
+    expose:
+    - '8899'
+    healthcheck:
+      interval: 30s
+      retries: 3
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:8899/api/health')
+      timeout: 5s
+    networks:
+    - videohub-net
+    restart: unless-stopped
+    volumes:
+    - ./data/video_cache:/app/data/video_cache
+    - ./data/image_cache:/app/data/image_cache
+    - ./ssl:/app/ssl
+    - ./seed:/app/seed
+    - mihomo-data:/root/.config/mihomo
+    - ./nginx:/app/nginx
+    - ./ssl/webroot:/var/www/certbot
+    - /var/run/docker.sock:/var/run/docker.sock
+  mihomo:
+    cap_add:
+    - NET_ADMIN
+    container_name: videohub-mihomo
+    devices:
+    - /dev/net/tun
+    expose:
+    - '7890'
+    - '9090'
+    healthcheck:
+      interval: 30s
+      retries: 3
+      test:
+      - CMD-SHELL
+      - 'wget -qO- --header=''Authorization: Bearer ${MIHOMO_SECRET:-mihomo_admin_2026}''
+        http://127.0.0.1:9090/version || exit 1'
+      timeout: 5s
+    image: metacubex/mihomo:Alpha
+    networks:
+    - videohub-net
+    restart: unless-stopped
+    volumes:
+    - ./mihomo/config.yaml:/root/.config/mihomo/config.yaml:ro
+    - mihomo-data:/root/.config/mihomo
+  postgres:
+    container_name: videohub-db
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+    healthcheck:
+      interval: 5s
+      retries: 5
+      test:
+      - CMD-SHELL
+      - pg_isready -U ${POSTGRES_USER}
+      timeout: 3s
+    image: postgres:16-alpine
+    networks:
+    - videohub-net
+    restart: unless-stopped
+    volumes:
+    - ./data/pg-data:/var/lib/postgresql/data
+    - ./seed:/docker-entrypoint-initdb.d:ro
+  shlink:
+    container_name: shlink
+    depends_on:
+      postgres:
+        condition: service_started
+    environment:
+    - IS_HTTPS_ENABLED=true
+    - DB_DRIVER=postgres
+    - DB_NAME=shlink
+    - DB_USER=${POSTGRES_USER}
+    - DB_PASSWORD=${POSTGRES_PASSWORD}
+    - DB_HOST=postgres
+    - GEOLITE_LICENSE_KEY=
+    - DEFAULT_SHORT_CODES_LENGTH=6
+    - REDIRECT_CACHE_LIFETIME=30
+    expose:
+    - '8080'
+    image: shlinkio/shlink:stable
+    networks:
+    - videohub-net
+    restart: unless-stopped
+  shlink-web:
+    container_name: shlink-web
+    environment:
+    - SHLINK_API_KEY=${SHLINK_API_KEY:-}
+    - SHLINK_API_URL=http://shlink:8080
+    expose:
+    - '8080'
+    image: shlinkio/shlink-web-client
+    networks:
+    - videohub-net
+    restart: unless-stopped
+  web:
+    container_name: videohub-web
+    depends_on:
+      api:
+        condition: service_started
+    image: nginx:alpine
+    networks:
+    - videohub-net
+    ports:
+    - 80:80
+    - 443:443
+    restart: unless-stopped
+    volumes:
+    - ./nginx/frontend.conf:/etc/nginx/conf.d/default.conf
+    - ./frontend:/usr/share/nginx/html:ro
+    - ./ssl:/etc/nginx/ssl:ro
+    - ./ssl/domains:/etc/nginx/ssl/domains:ro
+    - ./ssl/webroot:/var/www/certbot:ro
+    - ./nginx/ssl-sites:/etc/nginx/ssl-sites:ro
+    - ./data/image_cache:/app/image_cache:ro
+volumes:
+  mihomo-data: null
+

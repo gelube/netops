@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+
+<title data-i18n="play_title">Play</title>
+
+<script src="/js/hls.min.js?v=v47"></script>
+
+<script src="/js/vr-player.js?v=v47"></script>
+
+<script src="/js/i18n.js?v=v47"></script>
+
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box}
+
+body{background:#0f0f0f;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+
+a{color:#ff4757;text-decoration:none}
+
+/* Player area */
+
+.player-section{position:relative;width:100%;background:#000;aspect-ratio:16/9;max-height:56vh;overflow:hidden}
+
+#playerContainer{width:100%;height:100%}
+
+#playerContainer video{width:100%;height:100%;object-fit:contain;background:#000}
+
+/* VR mode hint banner */
+
+.vr-mode-hint{position:absolute;top:50px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;padding:6px 16px;border-radius:4px;font-size:13px;z-index:10;pointer-events:none;opacity:0;transition:opacity .4s}
+
+.vr-mode-hint.show{opacity:1}
+
+.player-loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.85);z-index:5}
+
+.loading-spinner{width:48px;height:48px;border:3px solid #333;border-top-color:#ff4757;border-radius:50%;animation:spin 1s linear infinite}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.loading-text{margin-top:12px;font-size:14px;color:#aaa}
+
+.loading-sub{font-size:12px;color:#666;margin-top:4px}
+
+.player-error{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.9);z-index:7}
+
+.player-error div{margin:8px 0;font-size:14px;color:#aaa}
+
+.player-error a{color:#ff4757}
+
+/* Video info */
+
+.video-info{padding:16px;max-width:1200px;margin:0 auto}
+
+.video-info h1{font-size:18px;line-height:1.4;margin-bottom:8px}
+
+.video-meta{font-size:13px;color:#888;display:flex;flex-wrap:wrap;gap:12px}
+
+/* Video tags - glass pill style (replaces harsh red #e50914 tags) */
+.video-tag-link{display:inline-block;padding:4px 12px;margin:2px;border-radius:14px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:#dcdce6;font-size:12px;font-weight:500;text-decoration:none;cursor:pointer;margin:2px;transition:background .15s ease,color .15s ease,border-color .15s ease}
+.video-tag-link:hover{background:rgba(255,255,255,0.2);border-color:rgba(255,255,255,0.4);color:#fff}
+
+/* Ad slots */
+.player-ad-top,.player-ad-bot{width:100%;margin:8px auto;text-align:center;min-height:120px}
+.player-ad-top:empty,.player-ad-bot:empty{display:none}
+.player-ad-top iframe,.player-ad-bot iframe{max-width:100%;border:0;min-height:120px;width:100%}
+.related-layout{display:grid;grid-template-columns:1fr;max-width:1200px;margin:0 auto;gap:0}
+.related-center{min-width:0;max-width:1200px;margin:0 auto}
+
+/* Sidebar ads: pushed to screen edges, center stays 1200px */
+@media(min-width:1800px){
+  .related-layout{display:flex!important;max-width:none!important;padding:0!important;gap:12px;align-items:stretch;justify-content:center;width:100vw;margin-left:calc((1200px - 100vw)/2);flex-wrap:nowrap}
+  .player-sidebar-ad{display:block!important;width:300px!important;min-width:300px!important;max-width:300px!important;text-align:center;flex-shrink:0;align-self:stretch}
+  #player_left_sidebar{margin-right:0!important}
+  #player_right_sidebar{margin-left:0!important}
+  .player-sidebar-ad iframe{width:100%!important;height:100%;border:0}
+  .player-sidebar-ad>div{width:100%!important;height:100%!important}
+  .related-center{width:1200px!important;min-width:1200px!important;max-width:1200px!important;flex-shrink:0;margin:0!important}
+}
+@media(min-width:1400px) and (max-width:1799px){
+  .related-layout{display:flex!important;max-width:none!important;padding:0!important;gap:8px;align-items:stretch;justify-content:center;width:100vw;margin-left:calc((1200px - 100vw)/2);flex-wrap:nowrap}
+  .player-sidebar-ad{display:block!important;width:200px!important;min-width:200px!important;max-width:200px!important;text-align:center;flex-shrink:0;align-self:stretch}
+  #player_left_sidebar{margin-right:0!important}
+  #player_right_sidebar{margin-left:0!important}
+  .player-sidebar-ad iframe{width:100%!important;height:100%;border:0}
+  .player-sidebar-ad>div{width:100%!important;height:100%!important}
+  .related-center{flex:1 1 0;min-width:0;max-width:1200px;flex-shrink:1;margin:0!important}
+}
+
+
+.sz-wu0swg{padding:8px 16px;max-width:1200px;margin:0 auto}
+
+.sz-wu0swg img{max-width:100%;border-radius:4px;display:block}
+
+.sz-wu0swg a{display:block}
+
+/* Ad placeholder blocks */
+
+.cb-5b1272{text-align:center;margin:8px auto}
+
+.ct-15khaf{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;display:block}
+
+.ci-n5qo5a{display:flex;align-items:center;justify-content:center;border-radius:6px;overflow:hidden}
+
+#bh .ci-n5qo5a{min-height:60px;width:100%;margin:0 auto}
+
+#bt .ci-n5qo5a,#bb .ci-n5qo5a{min-height:60px;width:100%;margin:0 auto}
+
+#bs .ci-n5qo5a{min-height:250px}
+
+#bf .ci-n5qo5a,#bft .ci-n5qo5a{min-height:90px;border-radius:4px}
+
+/* Related videos */
+
+.related-section{padding:16px;max-width:1200px;margin:0 auto}
+
+.related-section h2{font-size:16px;margin-bottom:12px;color:#ccc}
+
+.related-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+
+.related-card{background:#1a1a1a;border-radius:6px;overflow:hidden;transition:transform .2s}
+
+.related-card:hover{transform:translateY(-2px)}
+
+.related-card img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block}
+
+.related-card .thumb-placeholder{width:100%;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;background:#1a1a1a;font-size:1.8rem}
+
+.related-card .info{padding:8px}
+
+.related-card h3{font-size:13px;line-height:1.3;color:#ccc;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* Pause ad overlay */
+
+.overlay-pause{position:absolute;inset:0;display:none;background:rgba(0,0,0,.9);z-index:8;cursor:pointer;overflow:hidden}
+
+.overlay-pause img{width:100%;height:100%;border-radius:0;object-fit:cover}
+
+.overlay-pause .countdown{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(255,71,87,.95);color:#fff;padding:8px 24px;border-radius:24px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.5);display:flex;align-items:center;gap:8px;z-index:100000}
+.overlay-pause .countdown::before{content:'';width:10px;height:10px;border-radius:50%;background:#fff;animation:pulse 1s infinite}
+
+.overlay-pause .countdown:hover{background:#ff4757}
+
+/* Preroll ad overlay */
+
+.overlay-preroll{position:absolute;inset:0;display:none;background:rgba(0,0,0,.95);z-index:9;padding:0;overflow:hidden}
+
+.overlay-preroll img{width:100%;height:100%;border-radius:0;object-fit:cover}
+
+.overlay-preroll .countdown{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(255,71,87,.95);color:#fff;padding:8px 24px;border-radius:24px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.5);display:flex;align-items:center;gap:8px;z-index:100000}
+.overlay-preroll .countdown::before{content:'';width:10px;height:10px;border-radius:50%;background:#fff;animation:pulse 1s infinite}
+@keyframes pulse{0%{opacity:1}50%{opacity:.3}100%{opacity:1}}
+
+.overlay-preroll .countdown:hover{background:#ff4757}
+
+.overlay-preroll .skip-btn{position:absolute;top:12px;right:16px;background:rgba(255,255,255,.2);color:#fff;padding:8px 20px;border-radius:24px;font-size:14px;font-weight:600;cursor:pointer;display:none;backdrop-filter:blur(4px);z-index:100000}
+
+.overlay-preroll .skip-btn:hover{background:rgba(255,255,255,.25)}
+
+.overlay-preroll .cd-h2hcke{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.6);color:#aaa;padding:2px 8px;border-radius:3px;font-size:11px}
+.overlay-preroll #prerollSlot{width:100%;height:100%;display:block;padding:0;margin:0}
+.overlay-preroll #prerollSlot iframe{width:100%!important;height:100%!important;border:0;display:block}
+.overlay-preroll #prerollSlot .aads-ad-container{width:100%!important;height:100%!important;display:block!important}
+.overlay-preroll #prerollSlot .aads-ad-container iframe{width:100%!important;height:100%!important}
+.overlay-pause #boostPause{width:100%;height:100%;display:block;padding:0;margin:0}
+.overlay-pause #boostPause iframe{width:100%!important;height:100%!important;border:0;display:block}
+.overlay-pause #boostPause .aads-ad-container{width:100%!important;height:100%!important;display:block!important}
+.overlay-pause #boostPause .aads-ad-container iframe{width:100%!important;height:100%!important}
+
+/* Lang toggle in player */
+
+.lang-toggle-player{position:fixed;top:8px;right:8px;z-index:20;background:rgba(0,0,0,.6);border:1px solid #444;border-radius:4px;color:#ccc;padding:4px 8px;cursor:pointer;font-size:14px}
+
+.lang-toggle-player:hover{background:rgba(0,0,0,.8)}
+
+@media(max-width:768px){
+
+  .related-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+
+  .video-info h1{font-size:15px}
+
+}
+
+/* Player action bar */
+.player-actions{display:flex;align-items:center;gap:12px;padding:8px 0;flex-wrap:wrap}
+.player-btn{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.08);border:1px solid #333;border-radius:20px;padding:6px 14px;color:#ccc;font-size:13px;cursor:pointer;transition:all .2s;user-select:none}
+.player-btn:hover{background:rgba(255,255,255,.12);border-color:#555}
+.player-btn.liked{color:#ff4757;border-color:#ff475744;background:rgba(255,71,87,.1)}
+.player-btn.faved{color:#ffa502;border-color:#ffa50244;background:rgba(255,165,2,.1)}
+.player-btn svg{width:16px;height:16px;fill:currentColor}
+.speed-btn{min-width:52px;justify-content:center;font-weight:600}
+.player-stat{font-size:14px;color:#aaa;display:inline-flex;align-items:center;gap:4px}
+.speed-menu{position:absolute;background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:4px 0;z-index:10;display:none;flex-direction:column;min-width:80px}
+.speed-menu.show{display:flex}
+.speed-menu-item{padding:6px 16px;color:#ccc;font-size:13px;cursor:pointer;text-align:center}
+.speed-menu-item:hover{background:rgba(255,255,255,.08)}
+.speed-menu-item.active{color:#ff4757;font-weight:600}
+
+
+/* Mobile ad fixes */
+@media(max-width:768px){
+  .player-ad-top,.player-ad-bot{margin:4px auto;width:100%;min-height:100px;display:block!important}
+  .player-ad-top>div,.player-ad-bot>div{display:block!important;width:100%!important;min-height:100px}
+  .player-ad-top iframe,.player-ad-bot iframe{width:100%!important;min-height:100px;border:0}
+  .player-ad-top .aads-ad-container,.player-ad-bot .aads-ad-container{width:100%!important;min-height:100px}
+  .player-ad-top .aads-ad-container iframe,.player-ad-bot .aads-ad-container iframe{width:100%!important;min-height:100px!important}
+  .player-sidebar-ad{display:none!important}
+}
+
+</style>
+
+<link rel="stylesheet" href="css/auth.css?v=v46">
+<link rel="stylesheet" href="css/responsive.css?v=v46">
+<script>
+(async function(){try{const r=await fetch("/api/settings");const s=await r.json();if(s.site_name){document.title=s.site_name;document.querySelectorAll(".site-name-foot").forEach(function(e){e.textContent=s.site_name;});}}catch(e){}})();
+</script>
+</head>
+
+<body>
+
+<select id="langSelector" class="lang-toggle-player" onchange="setLang(this.value)" style="background:rgba(0,0,0,.6);border:1px solid #444;border-radius:4px;color:#ccc;padding:4px 8px;cursor:pointer;font-size:13px">
+
+  <option value="en">English</option>
+
+  <option value="zh-TW">繁體中文</option>
+
+  <option value="ru">Русский</option>
+
+  <option value="ja">日本語</option>
+
+  <option value="ko">한국어</option>
+
+  <option value="es">Español</option>
+
+</select>
+
+
+
+<div class="player-ad-top"><div id="bt" style="display:none"></div></div>
+<div class="player-section" style="max-width:100%">
+
+  <div id="playerContainer"></div>
+
+  <div class="player-loading" id="playerLoading">
+
+    <div class="loading-spinner"></div>
+
+    <div class="loading-text" id="loadingText"></div>
+
+    <div class="loading-sub" id="loadingSub" style="display:none"></div>
+
+  </div>
+
+  <div class="overlay-pause" id="boostPause"><span class="countdown" id="pauseCd" style="display:none" onclick="closePausePromo()"></span></div>
+
+  <div class="overlay-preroll" id="overlayPreroll">
+
+    <div id="prerollSlot"></div>
+
+    <div class="countdown" id="prerollCd" onclick="closePrerollPromo()"></div>
+
+    <div class="skip-btn" id="prerollClose" onclick="closePrerollPromo()" data-i18n="btn_skip">Skip</div>
+
+  </div>
+
+</div>
+
+<div class="player-ad-bot"><div id="bb" style="display:none"></div></div>
+
+<div class="video-info">
+
+  <h1 id="videoTitle" data-i18n="loading">Loading...</h1>
+
+  <div class="video-meta" id="videoMeta"></div>
+  <div class="player-actions" id="playerActions">
+    <button class="player-btn" id="btnLike" onclick="togglePlayerLike()">
+      <svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg> <span id="likeCount">0</span>
+    </button>
+    <button class="player-btn" id="btnFav" onclick="togglePlayerFav()">
+      <svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg> <span id="favCount">0</span>
+    </button>
+
+  </div>
+  <div id="videoTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px"></div>
+</div>
+
+
+
+
+
+
+<div class="related-section">
+
+  <h2 data-i18n="related_videos" id="relatedTitle" style="display:inline">Related Videos</h2>
+  <a id="backToRelated" href="javascript:void(0)" data-i18n="tag_all_videos" style="display:none;margin-left:12px;font-size:13px;color:#6fb1ff;text-decoration:none;cursor:pointer">All Videos →</a>
+
+  <div class="related-layout">
+<div id="player_left_sidebar" class="player-sidebar-ad"></div>
+<div class="related-center">
+<div class="related-grid" id="relatedGrid"></div>
+</div>
+<div id="player_right_sidebar" class="player-sidebar-ad"></div>
+</div>
+
+</div>
+
+
+
+
+
+<script>// === GLOBAL ERROR TRAP ===
+window.addEventListener('error', function(e) {
+  console.error('[VideoHub ERROR]', e.message, e.filename + ':' + e.lineno + ':' + e.colno);
+  if (e.error) console.error('[VideoHub STACK]', e.error.stack);
+});
+window.addEventListener('unhandledrejection', function(e) {
+  console.error('[VideoHub REJECT]', e.reason ? (e.reason.stack || e.reason.message || String(e.reason)) : 'unknown');
+});
+
+const API = '';
+const isMobile = window.innerWidth <= 768;
+
+// Helpers (defined in app.js but player.html doesn't load it)
+function formatCount(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(n || 0);
+}
+function localizeCategory(name) {
+  if (!name) return t('uncategorized') || 'Uncategorized';
+  var lang = localStorage.getItem('vh_lang') || 'en';
+  var mapping = window._catI18n && window._catI18n[name];
+  if (mapping && mapping[lang]) return mapping[lang];
+  return name;
+}
+
+// Render video meta (views, category, time, uploader, stats) — reusable on lang change
+function renderVideoMeta(video) {
+  if (!video) return;
+  document.getElementById('videoMeta').innerHTML =
+    `${t('views_count').replace('{n}', video.views||0)} &bull; ${esc(localizeCategory(video.category))} &bull; ${esc(timeAgo(video.created_at))}${video.uploader_slug ? ' &bull; <a href="' + escUrl('/channel/' + encodeURIComponent(video.uploader_slug)) + '" style="color:#aaa;text-decoration:none">' + esc(video.uploader_name || 'Anonymous') + '</a>' + (video.uploader_verified ? ' <span style="color:#1da1f2">✓</span>' : '') : ''}`;
+  var lc = document.getElementById('likeCount');
+  if (lc) lc.textContent = formatCount(video.likes || 0);
+  var fc = document.getElementById('favCount');
+  if (fc) fc.textContent = formatCount(video.favorites || 0);
+}
+
+const id = new URLSearchParams(location.search).get('id');
+
+let hlsIns = null;
+let vrPlayer = null;
+let boostPause = null;
+let pauseActive = false;
+let boostPop = null;
+let popDone = false;
+let _playerReady = false;  // HLS/video ready to play
+let _wantPlay = false;    // preroll done, want to start playback
+
+if (!id) {
+
+  document.getElementById('videoTitle').removeAttribute('data-i18n');
+
+  document.getElementById('videoTitle').textContent = t('no_video_specified');
+
+  document.getElementById('playerLoading').style.display = 'none';
+
+}
+
+// Apply i18n to initial static elements
+
+setMessage(t('resolving_source'), t('first_resolve_hint'));
+
+function cleanTitle(title) {
+
+  if (!title) return title;
+
+  // Remove common source prefixes: [91porna], [91porn.plus], 【site name】, etc.
+
+  return title
+
+    .replace(/^[\[【][^\]】]+[\]】]\s*/, '')
+
+    .replace(/^\[[^\]]+\]\s*/, '')
+
+    .replace(/^[—\-–]\s*/, '')
+
+    .trim() || title;
+
+}
+
+async function init() {
+
+  if (!id) return;
+
+  // 1. Run ad loading and video resolving in parallel
+  // Preroll must never block playback forever - race against 8s timeout
+  const prerollDone = loadBoost();
+  const prerollRace = Promise.race([
+    prerollDone,
+    new Promise(r => setTimeout(r, 8000))
+  ]);
+
+  const result = await resolveVideo();
+
+  if (!result || !result.videoUrl) {
+
+    showError(t('resolve_failed'));
+
+    return;
+
+  }
+
+  // 2. Init player immediately (preloads buffer) but don't autoplay yet
+
+  document.getElementById('playerLoading').style.display = 'none';
+
+  if (result.isVR) {
+
+    window._vrPreloaded = true;  // set before init so VR player will not autoplay during preroll
+    initVRPlayer(result.videoUrl, result.isHLS);
+
+
+
+  } else {
+
+    initPlayer(result.videoUrl, result.isHLS, true); // preloadOnly=true
+
+  }
+
+  // 3. Wait for preroll (with timeout fallback - never block forever)
+  await prerollRace;
+
+  // 4. Now start actual playback (if player ready, play now; else callback fires later)
+  _wantPlay = true;
+  if (_playerReady) startPlayback(result.isVR);
+  // If not ready yet, MANIFEST_PARSED callback will call startPlayback when ready
+
+  // 5. Load related
+
+  window._currentVideoCategory = result.video.category;
+  window._currentVideoId = id;
+  window._currentVideo = result.video;
+  populateVideoTags(result.video.tags);
+  loadRelated(result.video.category, id);
+
+}
+
+function startPlayback(isVR) {
+  if (isVR) {
+    var v = document.getElementById('vrVideo');
+    if (v) {
+      var p = v.play();
+      if (p && p.catch) p.catch(function(err) {
+        console.warn('[Player] VR autoplay blocked:', err);
+      });
+    }
+  } else {
+    var v = document.getElementById('videoPlayer');
+    if (v) {
+      v.play().then(function() {
+        // playing
+      }).catch(function() {
+        if (v.paused) { /* autoplay blocked, native controls available */ }
+      });
+    }
+  }
+}
+
+// === Resolve video info + stream URL ===
+
+async function resolveVideo() {
+
+  let video;
+
+  // Load category i18n map in parallel (used by localizeCategory in the meta)
+  const catPromise = (async () => {
+    try {
+      const cats = await (await fetch(`${API}/api/categories`)).json();
+      window._catI18n = {};
+      cats.forEach(c => { if (c.name_i18n && Object.keys(c.name_i18n).length) window._catI18n[c.name] = c.name_i18n; });
+    } catch {}
+  })();
+
+  // Kick off /api/play in parallel with /api/videos (it only needs `id`, no data dep).
+  // The response is awaited later, after metadata is loaded & rendered.
+  const playFetchPromise = fetch(`${API}/api/play/${id}`).catch(() => null);
+
+  try {
+
+    const r = await fetch(`${API}/api/videos/${id}`);
+
+    video = await r.json();
+
+    fetch(`${API}/api/videos/${id}/view`, {method:'POST'}).catch(()=>{});
+
+  } catch {
+
+    document.getElementById('videoTitle').removeAttribute('data-i18n');
+
+    document.getElementById('videoTitle').textContent = t('video_info_load_failed');
+
+    showError(t('video_info_load_failed'));
+
+    return null;
+
+  }
+
+  await catPromise;  // ensure category i18n map is ready before rendering meta
+
+  document.getElementById('videoTitle').removeAttribute('data-i18n');
+
+  document.getElementById('videoTitle').textContent = cleanTitle(video.title) || t('no_title');
+
+  renderVideoMeta(video);
+
+  const isVR = video.vr_mode === 'equirectangular';
+
+  const sourceUrl = video.url;
+
+  // 1. /api/play
+
+  setMessage(t('resolving_source'), t('first_resolve_hint'));
+
+  let videoUrl = null;
+
+  let isHLS = false;
+
+  try {
+
+    const playRes = await playFetchPromise;
+
+    if (playRes && playRes.ok) {
+
+      const ct = (playRes.headers.get('content-type') || '').toLowerCase();
+
+      if (ct.includes('mpegurl') || ct.includes('vnd.apple')) {
+
+        videoUrl = `${API}/api/play/${id}`;
+
+        isHLS = true;
+
+        setMessage(t('resolve_success_hls'), '');
+
+      } else if (ct.includes('json')) {
+
+        const data = await playRes.json();
+
+        if (data.video_url) {
+
+          videoUrl = data.video_url;
+
+          isHLS = data.format === 'hls' || data.video_url.includes('.m3u8');
+
+          setMessage(t('resolve_success_video'), '');
+
+        }
+
+      } else if (ct.startsWith('video/')) {
+
+        videoUrl = `${API}/api/play/${id}`;
+
+        isHLS = ct.includes('mpegurl');
+
+        setMessage(t('cache_hit'), '');
+
+      }
+
+    }
+
+  } catch(e) { console.warn('play endpoint error:', e); }
+
+  // 2. Fallback: /api/resolve
+
+  if (!videoUrl) {
+
+    setMessage(t('trying_backup'), '');
+
+    try {
+
+      const resolved = await (await fetch(`${API}/api/resolve?url=${encodeURIComponent(sourceUrl)}`)).json();
+
+      if (resolved.video_url) {
+
+        videoUrl = `${API}/api/proxy/stream?url=${encodeURIComponent(resolved.video_url)}&source=${encodeURIComponent(sourceUrl)}`;
+
+        isHLS = (resolved.video_url||'').includes('.m3u8');
+
+      }
+
+    } catch(e) { console.warn('resolve failed:', e); }
+
+  }
+
+  // 3. Fallback: DB cached URL
+
+  if (!videoUrl && video.video_url) {
+
+    setMessage(t('using_cached'), t('cached_may_expire'));
+
+    videoUrl = `${API}/api/proxy/stream?url=${encodeURIComponent(video.video_url)}&source=${encodeURIComponent(sourceUrl)}`;
+
+    isHLS = video.video_url.includes('.m3u8');
+
+  }
+
+  if (!videoUrl) return null;
+
+  return { videoUrl, isHLS, isVR, video };
+
+}
+
+// === Normal player (HLS.js) ===
+
+function initPlayer(url, isHLS, preloadOnly) {
+
+  const container = document.getElementById('playerContainer');
+
+  const video = document.createElement('video');
+
+  video.id = 'videoPlayer';
+
+  video.controls = true;
+
+  video.playsInline = true;
+
+  video.muted = true;  // muted autoplay: browsers block sound autoplay without user gesture
+
+  video.preload = 'auto';
+
+  video.style.width = '100%';
+
+  video.style.height = '100%';
+
+  video.style.background = '#000';
+
+  container.innerHTML = '';
+
+  container.appendChild(video);
+
+  // Pause ad - delayed to skip during seek
+  // Chrome fires pause BEFORE seeking, so _seeking flag doesn't work
+  // Use 200ms delay + check video.seeking property
+  var _pauseAdTimer = null;
+
+  video.addEventListener('seeking', () => { 
+    if (_pauseAdTimer) { clearTimeout(_pauseAdTimer); _pauseAdTimer = null; }
+    closePausePromo(); pauseActive = false; 
+  });
+
+  video.addEventListener('pause', () => {
+    if (_pauseAdTimer) clearTimeout(_pauseAdTimer);
+    _pauseAdTimer = setTimeout(() => {
+      _pauseAdTimer = null;
+      if (video.seeking || video.ended) return;  // seeking or ended, skip ad
+      if (boostPause && !pauseActive) { showPausePromo(boostPause); pauseActive = true; }
+    }, 200);
+  });
+
+  video.addEventListener('play', () => { 
+    if (_pauseAdTimer) { clearTimeout(_pauseAdTimer); _pauseAdTimer = null; }
+    closePausePromo(); pauseActive = false; 
+  });
+
+  if (isHLS && typeof Hls !== 'undefined' && Hls.isSupported()) {
+
+    hlsIns = new Hls({ maxBufferLength: 10, maxMaxBufferLength: 60, startLevel: -1, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 6, highBufferWatchdogPeriod: 2, maxBufferSize: 30 * 1024 * 1024 });
+
+    hlsIns.loadSource(url);
+
+    hlsIns.attachMedia(video);
+
+    // Always register MANIFEST_PARSED - sets _playerReady and starts playback if wanted
+    hlsIns.on(Hls.Events.MANIFEST_PARSED, () => {
+      _playerReady = true;
+      if (_wantPlay) startPlayback(false);
+    });
+
+    hlsIns.on(Hls.Events.ERROR, (_, data) => {
+
+      if (data.fatal) {
+
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hlsIns.startLoad();
+
+        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hlsIns.recoverMediaError();
+
+        else { hlsIns.destroy(); showError(t('tap_to_play', 'Tap to Play')); }
+
+      }
+
+    });
+
+  } else if (isHLS && video.canPlayType('application/vnd.apple.mpegurl')) {
+
+    video.src = url;
+    video.addEventListener('loadedmetadata', () => {
+      _playerReady = true;
+      if (_wantPlay) startPlayback(false);
+    });
+
+  } else {
+
+    video.src = url;
+    video.addEventListener('loadeddata', () => {
+      _playerReady = true;
+      if (_wantPlay) startPlayback(false);
+    });
+
+  }
+
+  video.onerror = () => showError(t('video_load_failed') + ' (' + (video.error?.code||'') + ')');
+
+}
+
+// === VR player: handled by vr-player.js ===
+
+function showVrHint(text) {
+
+  const hint = document.getElementById('vrModeHint');
+
+  if (!hint) return;
+
+  hint.textContent = text;
+
+  hint.classList.add('show');
+
+  clearTimeout(hint._timer);
+
+  hint._timer = setTimeout(() => hint.classList.remove('show'), 2500);
+
+}
+
+function tryAutoplay(video) {
+
+  if (video && !video.paused && video.readyState >= 2) return;
+
+  video.play().then(() => {
+
+  }).catch(() => {
+
+    if (video.paused) { /* autoplay blocked, user can tap native controls */ }
+
+  });
+
+}
+
+// Promos
+
+let _prerollResolve = null; // resolved by closePrerollPromo
+
+// Universal ad injector
+function injectAd(el, html) {
+  if (!el || !html) return;
+  var code = Array.isArray(html) ? html.join('') : html;
+  // Anti-block: backend already rewrites URLs to /_adp/ when use_proxy=1
+  // No frontend rewrite needed - respect the use_proxy flag per ad
+  el.innerHTML = code;
+  el.style.display = 'block';
+  if(el.parentNode) el.parentNode.style.display = 'block';
+  el.querySelectorAll('script').forEach(function(s) {
+    var ns = document.createElement('script');
+    if (s.src) ns.src = s.src;
+    else ns.textContent = s.textContent;
+    if (s.async) ns.async = true;
+    if (s.defer) ns.defer = true;
+    if (s.type) ns.type = s.type;
+    s.replaceWith(ns);
+  });
+  el.querySelectorAll('iframe[src]').forEach(function(f) {
+    // Frontend no longer rewrites iframe src - backend handles via use_proxy flag
+    // Force iframe to fill container width
+    f.style.width = '100%';
+    f.style.maxWidth = '100%';
+  });
+  // Force all child divs and iframes to fill width (works regardless of class name)
+  el.querySelectorAll('div').forEach(function(d) {
+    d.style.width = '100%';
+    d.style.maxWidth = '100%';
+  });
+  el.querySelectorAll('iframe').forEach(function(f) {
+    f.style.width = '100%';
+    f.style.maxWidth = '100%';
+  });
+}
+
+async function loadBoost() {
+  try {
+    const r = await fetch(`${API}/api/feed/html`);
+    const slotMap = await r.json();
+    if (!slotMap || typeof slotMap !== 'object') return;
+    // Player page: stagger ad injection to avoid connection limit
+    // 1. Top + bottom: immediate (visible above fold)
+    if (slotMap.player_top) injectAd(document.getElementById('bt'), slotMap.player_top);
+    if (slotMap.player_bot) injectAd(document.getElementById('bb'), slotMap.player_bot);
+    // 2. Sidebars: deferred 800ms (only show on wide screens)
+    setTimeout(function() {
+      if (slotMap.player_left_sidebar) injectAd(document.getElementById('player_left_sidebar'), slotMap.player_left_sidebar);
+      if (slotMap.player_right_sidebar) injectAd(document.getElementById('player_right_sidebar'), slotMap.player_right_sidebar);
+    }, 800);
+    if (slotMap.player_pause) {
+      var pauseHtml = Array.isArray(slotMap.player_pause) ? slotMap.player_pause.join('') : slotMap.player_pause;
+      boostPause = { ad_code: pauseHtml, id: 0, image_url: '', link_url: '', redirect_url: '', title: 'Ad', countdown: 6, pause_duration: 5 };
+    }
+    if (slotMap.popunder) initPop({ ad_code: slotMap.popunder });
+    if (slotMap.preroll) {
+      var prerollHtml = Array.isArray(slotMap.preroll) ? slotMap.preroll.join('') : slotMap.preroll;
+      showPrerollPromo({ ad_code: prerollHtml, id: 0, image_url: '', link_url: '', redirect_url: '', title: 'Ad', countdown: 5 });
+      return new Promise(resolve => { _prerollResolve = resolve; });
+    }
+  } catch(e) { console.warn('promos load failed:', e); }
+}
+
+let pauseTimer = null;
+
+function showPausePromo(ad) {
+
+  const el = document.getElementById('boostPause');
+
+  if (!el) return;
+
+  if (pauseTimer) { clearInterval(pauseTimer); pauseTimer = null; }
+
+  el.style.display = 'flex';
+
+  const dur = ad.pause_duration || 5;
+  let sec = dur;
+
+  // Inject ad content FIRST, then start countdown
+  try {
+    if (ad.image_url) {
+      const isDataUri2 = ad.image_url && ad.image_url.startsWith('data:');
+      const pauseImgSrc = isDataUri2 ? ad.image_url : `/api/proxy/image?url=${encodeURIComponent(ad.image_url)}`;
+      el.innerHTML = `<img src="${pauseImgSrc}" alt="ad"><span class="countdown" id="pauseCd"></span>`;
+    } else if (ad.ad_code) {
+      el.innerHTML = ad.ad_code + '<span class="countdown" id="pauseCd"></span>';
+      el.querySelectorAll('script').forEach(s => {
+        const ns = document.createElement('script');
+        if (s.src) ns.src = s.src;
+        else ns.textContent = s.textContent;
+        s.replaceWith(ns);
+      });
+      forceAdFill(el);
+      setTimeout(() => forceAdFill(el), 500);
+      setTimeout(() => forceAdFill(el), 1500);
+      setTimeout(() => forceAdFill(el), 3000);
+    } else {
+      el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;background:rgba(0,0,0,.85);border-radius:8px;color:rgba(255,255,255,.5);font-size:16px;font-weight:600">${ad.title||'Ad'}</div><span class="countdown" id="pauseCd"></span>`;
+    }
+    if (ad.link_url) el.onclick = () => { window.open(ad.redirect_url || ad.link_url, '_blank'); closePausePromo(); };
+  } catch(e) { console.warn('pause ad inject error:', e); }
+
+  // Start countdown AFTER innerHTML is set, so cntEl points to live element
+  const cntEl = document.getElementById('pauseCd');
+  if (cntEl) { cntEl.textContent = 'Ad ' + sec + 's'; cntEl.style.display = ''; }
+
+  pauseTimer = setInterval(() => {
+    sec--;
+    if (sec <= 0) {
+      clearInterval(pauseTimer); pauseTimer = null;
+      closePausePromo();
+    } else {
+      const c = document.getElementById('pauseCd');
+      if (c) c.textContent = 'Ad ' + sec + 's';
+    }
+  }, 1000);
+
+}
+
+function closePausePromo() {
+
+  if (pauseTimer) { clearInterval(pauseTimer); pauseTimer = null; }
+
+  const el = document.getElementById('boostPause');
+
+  if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+
+  // Safety: ensure playerLoading is hidden
+  var pl2 = document.getElementById('playerLoading');
+  if (pl2) pl2.style.display = 'none';
+
+  pauseActive = false;
+
+}
+
+function initPop(ad) {
+
+  const last = parseInt(localStorage.getItem('vh_pop_ts') || '0');
+
+  if (Date.now() - last < 30*60*1000) return;
+
+  document.addEventListener('click', function handler(e) {
+
+    if (popDone) return;
+
+    if (['INPUT','TEXTAREA','SELECT','BUTTON'].includes(e.target.tagName)) return;
+
+    if (e.target.closest('video') || e.target.closest('.overlay-pause') || e.target.closest('.overlay-preroll')) return;
+
+    popDone = true;
+
+    localStorage.setItem('vh_pop_ts', Date.now().toString());
+
+    var popUrl = ad.redirect_url || ad.link_url || '';
+    var popCode = ad.ad_code || '';
+    if (!popUrl && !popCode) return;
+    var w = window.open('', '_blank');
+    if (w) {
+      if (popUrl) w.location = popUrl;
+      else if (popCode) { w.document.open(); w.document.write('<html><head><title></title></head><body>'+popCode+'</body></html>'); w.document.close(); }
+      try { w.blur(); window.focus(); } catch(_){}
+    }
+
+    document.removeEventListener('click', handler);
+
+  }, true);
+
+}
+
+
+// Force ad iframe to fill container
+function forceAdFill(container) {
+  if (!container) return;
+  container.style.cssText = 'width:100%!important;height:100%!important;display:block!important';
+  const divs = container.querySelectorAll('div');
+  divs.forEach(d => {
+    d.style.width = '100%';
+    d.style.height = '100%';
+    d.style.minHeight = '100%';
+    d.style.display = 'block';
+    d.style.margin = '0';
+    d.style.position = 'relative';
+  });
+  const iframes = container.querySelectorAll('iframe');
+  iframes.forEach(f => {
+    f.style.width = '100%';
+    f.style.height = '100%';
+    f.style.minHeight = '100%';
+    f.style.border = '0';
+    f.style.display = 'block';
+    f.style.margin = '0 auto';
+  });
+}
+
+let prerollClock = null;
+
+function showPrerollPromo(ad) {
+
+  const overlay = document.getElementById('overlayPreroll');
+
+  const content = document.getElementById('prerollSlot');
+
+  const countdown = document.getElementById('prerollCd');
+
+  const skip = document.getElementById('prerollClose');
+
+  if (!overlay) return;
+
+  // Countdown first - must start before ad injection
+  let seconds = ad.countdown || 6;
+  const showSkipAt = Math.max(0, seconds - 3);  // show Skip button after ~3s watched
+
+  countdown.textContent = 'Ad ' + seconds + 's';
+
+  countdown.style.display = '';
+
+  skip.style.display = 'none';
+
+  overlay.style.display = 'block';
+
+  // playerLoading is managed by init() - don't touch it here
+
+  prerollClock = setInterval(() => {
+
+    seconds--;
+
+    if (seconds <= 0) {
+
+      clearInterval(prerollClock);
+
+      prerollClock = null;
+
+      closePrerollPromo();
+
+    } else {
+
+      countdown.textContent = 'Ad ' + seconds + 's';
+
+      if (seconds <= showSkipAt) skip.style.display = '';
+
+    }
+
+  }, 1000);
+
+  // Inject ad content in try/catch
+  try {
+
+    if (ad.image_url) {
+
+      const isDataUri3 = ad.image_url && ad.image_url.startsWith('data:');
+
+      const imgUrl = isDataUri3 ? ad.image_url : `/api/proxy/image?url=${encodeURIComponent(ad.image_url)}`;
+
+      const goUrl = ad.redirect_url || ad.link_url || '#';
+
+      content.innerHTML = goUrl ? `<a href="${goUrl}" target="_blank"><img src="${imgUrl}" alt="promo"></a>` : `<img src="${imgUrl}" alt="promo">`;
+
+    } else if (ad.ad_code) {
+
+      content.innerHTML = ad.ad_code;
+
+      content.querySelectorAll('script').forEach(s => {
+        const ns = document.createElement('script');
+        if (s.src) ns.src = s.src;
+        else ns.textContent = s.textContent;
+        s.replaceWith(ns);
+      });
+
+      forceAdFill(content);
+      setTimeout(() => forceAdFill(content), 500);
+      setTimeout(() => forceAdFill(content), 1500);
+      setTimeout(() => forceAdFill(content), 3000);
+
+    } else {
+
+      const link = (ad.redirect_url || ad.link_url) ? `<a href="${ad.redirect_url || ad.link_url}" target="_blank">` : '';
+
+      const linkEnd = (ad.redirect_url || ad.link_url) ? '</a>' : '';
+
+      content.innerHTML = `${link}<div style="background:linear-gradient(135deg,#2a1a3e,#1a2a4e,#1a3e2a);border:2px dashed rgba(255,71,87,.5);border-radius:12px;padding:40px 60px;color:rgba(255,255,255,.6);font-size:20px;font-weight:700;text-align:center;letter-spacing:2px">${ad.title || 'Promoted'}</div>${linkEnd}`;
+
+    }
+
+  } catch(e) { console.warn('preroll ad inject error:', e); }
+
+  // Impression
+
+  fetch(`${API}/api/v/${ad.id}`, {method:'POST'}).catch(()=>{});
+
+}
+
+function closePrerollPromo() {
+
+  if (prerollClock) { clearInterval(prerollClock); prerollClock = null; }
+
+  const overlay = document.getElementById('overlayPreroll');
+
+  const content = document.getElementById('prerollSlot');
+
+  if (overlay) overlay.style.display = 'none';
+
+  if (content) content.innerHTML = '';
+
+  // Safety: ensure playerLoading is hidden
+  var pl = document.getElementById('playerLoading');
+  if (pl) pl.style.display = 'none';
+
+  // Unblock init()
+
+  if (_prerollResolve) { _prerollResolve(); _prerollResolve = null; }
+
+}
+
+// Thumbnail retry for related-video cards (app.js is not loaded on this page)
+var MAX_THUMB_RETRIES = 2;
+var _thumbObserver = null;
+if ('IntersectionObserver' in window) {
+  _thumbObserver = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (!entry.isIntersecting) return;
+      var ph = entry.target;
+      if (!ph.classList.contains('thumb-retry')) return;
+      var origSrc = ph.getAttribute('data-retry-src');
+      if (!origSrc) return;
+      var count = parseInt(ph.getAttribute('data-retry-count') || '0', 10);
+      _thumbObserver.unobserve(ph);
+      if (count >= MAX_THUMB_RETRIES) return;
+      ph.setAttribute('data-retry-count', String(count + 1));
+      var newImg = document.createElement('img');
+      newImg.onload = function() { ph.replaceWith(newImg); };
+      newImg.onerror = function() {
+        if (_thumbObserver) setTimeout(function() { _thumbObserver.observe(ph); }, 500);
+      };
+      newImg.src = origSrc + (origSrc.indexOf('?') > -1 ? '&' : '?') + '_r=' + Date.now();
+    });
+  }, { rootMargin: '200px' });
+}
+function imgRetry(img) {
+  var origSrc = img.getAttribute('data-src') || (img.src ? img.src.split('_r=')[0] : '');
+  var ph = document.createElement('div');
+  ph.className = 'thumb-placeholder thumb-retry';
+  ph.innerHTML = '\uD83C\uDFAC';
+  if (origSrc) {
+    ph.setAttribute('data-retry-src', origSrc);
+    ph.setAttribute('data-retry-count', '0');
+    if (_thumbObserver) _thumbObserver.observe(ph);
+  }
+  img.replaceWith(ph);
+}
+
+// Related videos + native promos
+
+async function loadRelated(category, excludeId) {
+  const grid = document.getElementById('relatedGrid');
+  if (!grid) return;
+  window._currentTagFilter = null;  // reset tag-filter state
+  // Restore related title + hide back link
+  var titleEl = document.getElementById('relatedTitle');
+  if (titleEl) { titleEl.setAttribute('data-i18n','related_videos'); titleEl.textContent = t('related_videos'); }
+  var backEl = document.getElementById('backToRelated');
+  if (backEl) backEl.style.display = 'none';
+  try {
+    const params = new URLSearchParams({size: 12});
+    if (category) params.set('category', category);
+    const res = await (await fetch(`${API}/api/videos?${params}`)).json();
+    const videos = Array.isArray(res) ? res : (res.items || []);
+    grid.innerHTML = '';
+    videos.filter(v => v.id != excludeId).slice(0, 8).forEach(v => {
+      const card = document.createElement('a');
+      card.className = 'related-card';
+      card.href = `/player?id=${v.id}`;
+      const thumbUrl = v.thumbnail ? (v.thumbnail.startsWith('/image_cache/') ? v.thumbnail : v.thumbnail.startsWith('data:') ? '' : `/api/proxy/image?url=${encodeURIComponent(v.thumbnail)}&source=${encodeURIComponent(v.url)}`) : '';
+      const thumb = thumbUrl ? `<img src="${escUrl(thumbUrl)}" data-src="${escUrl(thumbUrl)}" loading="lazy" alt="" onerror="imgRetry(this)">` : '<div class="thumb-placeholder">🎬</div>';
+      card.innerHTML = `${thumb}<div class="info"><h3>${esc(cleanTitle(v.title)||'')}</h3></div>`;
+      grid.appendChild(card);
+    });
+  } catch(e) { console.error('[VideoHub] loadRelated error:', e); }
+}
+
+// Show videos filtered by a tag in-place (replaces related grid, no page jump)
+async function loadRelatedByTag(tag){
+  const grid=document.getElementById('relatedGrid');
+  if(!grid) return;
+  const title=document.getElementById('relatedTitle');
+  const back=document.getElementById('backToRelated');
+  try{
+    const params=new URLSearchParams({tag:tag,size:12});
+    const res=await (await fetch(API+'/api/videos?'+params)).json();
+    const videos=Array.isArray(res)?res:(res.items||[]);
+    grid.innerHTML='';
+    if(!videos.length){
+      grid.innerHTML='<p style="color:#666;padding:12px">'+(t('no_videos')||'No videos')+'</p>';
+    }else{
+      videos.slice(0,12).forEach(v=>{
+        const card=document.createElement('a');
+        card.className='related-card';
+        card.href='/player?id='+v.id;
+        const thumbUrl=v.thumbnail?(v.thumbnail.startsWith('/image_cache/')?v.thumbnail:v.thumbnail.startsWith('data:')?'':'/api/proxy/image?url='+encodeURIComponent(v.thumbnail)+'&source='+encodeURIComponent(v.url)):'';
+        const thumb=thumbUrl?'<img src="'+escUrl(thumbUrl)+'" data-src="'+escUrl(thumbUrl)+'" loading="lazy" alt="" onerror="imgRetry(this)">':'<div class="thumb-placeholder">🎬</div>';
+        card.innerHTML=thumb+'<div class="info"><h3>'+esc(cleanTitle(v.title)||'')+'</h3></div>';
+        grid.appendChild(card);
+      });
+    }
+    if(title){ title.removeAttribute('data-i18n'); title.textContent='#'+localizeTag(tag); }
+    if(back){
+      back.href='/home?tag='+encodeURIComponent(tag);
+      back.textContent=t('tag_all_videos');
+      back.style.display='inline-block';
+    }
+    window._currentTagFilter=tag;  // track state for lang-change re-render
+  }catch(e){console.error('loadRelatedByTag error:',e);}
+}
+
+// Helpers
+
+function setMessage(text, sub) {
+
+  document.getElementById('loadingText').textContent = text || '';
+
+  document.getElementById('loadingSub').textContent = sub || '';
+
+}
+
+function showError(msg) {
+
+  const el = document.getElementById('playerLoading');
+
+  el.innerHTML = `<div class="player-error">
+
+    <div style="font-size:48px">⚠️</div>
+
+    <div>${msg}</div>
+
+  </div>`;
+
+}
+
+function timeAgo(dateStr) {
+
+  if (!dateStr) return '';
+
+  const diff = Date.now() - new Date(dateStr).getTime();
+
+  const m = Math.floor(diff / 60000);
+
+  if (m < 60) return t('minute_ago').replace('{n}', m);
+
+  const h = Math.floor(m / 60);
+
+  if (h < 24) return t('hour_ago').replace('{n}', h);
+
+  const d = Math.floor(h / 24);
+
+  if (d < 30) return t('day_ago').replace('{n}', d);
+
+  return dateStr.slice(0, 10);
+
+}
+
+// Re-apply i18n on lang change for player page
+
+window.addEventListener('langchange', () => {
+
+  applyI18n();
+
+  // Update loading text if still visible
+
+  const loadingEl = document.getElementById('playerLoading');
+
+  if (loadingEl && loadingEl.style.display !== 'none') {
+
+    setMessage(t('resolving_source'), t('first_resolve_hint'));
+
+  }
+
+  // Re-render dynamic content that was built with t()/localizeTag()/localizeCategory()
+
+  if (window._currentVideo) {
+    renderVideoMeta(window._currentVideo);
+    populateVideoTags(window._currentVideo.tags);
+  }
+
+  // Re-render related section title + back link if in tag-filter mode
+  if (window._currentTagFilter) {
+    var titleEl = document.getElementById('relatedTitle');
+    if (titleEl) titleEl.textContent = '#' + localizeTag(window._currentTagFilter);
+    var backEl = document.getElementById('backToRelated');
+    if (backEl) backEl.textContent = t('tag_all_videos');
+  }
+
+});
+
+// Blocker detection
+
+function checkShield(cb) {
+
+  const bait = document.createElement('div');
+
+  bait.innerHTML = '&nbsp;';
+
+  bait.className = 'sz-wu0swg cb-5b1272 ct-15khaf ec-j25kz3';
+
+  bait.style.cssText = 'position:absolute;top:-9999px;left:-9999px;height:1px;width:1px;';
+
+  document.body.appendChild(bait);
+
+  setTimeout(() => {
+
+    const blocked = bait.offsetHeight === 0 || bait.offsetParent === null;
+
+    bait.remove();
+
+    cb(blocked);
+
+  }, 250);
+
+}
+
+function showShieldMsg() {
+
+  document.querySelectorAll('.sz-wu0swg').forEach(slot => {
+
+    if (!slot.children.length) {
+
+      slot.innerHTML = '<div style="text-align:center;padding:12px;margin:6px auto;background:rgba(255,71,87,.08);border:1px solid rgba(255,71,87,.2);border-radius:8px">' +
+
+        '<div style="color:#ff6b7a;font-size:13px;font-weight:600" data-i18n="blocker_notice_title">Support us by disabling your ad blocker</div>' +
+
+        '<div style="color:#888;font-size:11px;margin-top:2px" data-i18n="blocker_notice_sub">Ads keep this site free.</div></div>';
+
+    }
+
+  });
+
+}
+
+// Go! (head scripts are non-deferred, so Hls/i18n are already loaded when this runs)
+init();
+
+// Cleanup HLS instance + video on navigation: frees memory and makes the page
+// eligible for back/forward cache (an active MSE SourceBuffer blocks bfcache).
+window.addEventListener('pagehide', function() {
+  try {
+    if (hlsIns) { hlsIns.destroy(); hlsIns = null; }
+    var v = document.getElementById('videoPlayer');
+    if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch(e){} }
+  } catch(e){}
+});
+// If restored from bfcache, the player was torn down on pagehide -> re-init.
+window.addEventListener('pageshow', function(event) {
+  if (event.persisted) init();
+});
+
+setTimeout(() => { /* blocker detection disabled */ }, 2000);
+
+</script>
+
+<div class="footer" style="text-align:center;padding:16px 20px;font-size:12px;color:#999;background:#1a1a2e">© 2023 <span class="site-name-foot"></span> · <a href="/contact" style="color:#999" data-i18n="footer_contact">Contact</a> · <a href="/dmca" style="color:#999" data-i18n="footer_dmca">DMCA</a> · <a href="/parental-control" style="color:#999" data-i18n="footer_parental">Parental Control</a> · <a href="/take-it-down" style="color:#999" data-i18n="footer_takedown">Take-down</a> · <a href="/privacy-2257" style="color:#999" data-i18n="footer_privacy">Privacy & 2257</a> · <a href="/terms" style="color:#999" data-i18n="footer_terms">Terms</a></div>
+<script src="js/auth.js?v=v46"></script>
+<script>
+function formatCount(n) {
+  if (n >= 1000000) return (n/1000000).toFixed(1).replace(/\.0$/,'') + 'M';
+  if (n >= 1000) return (n/1000).toFixed(1).replace(/\.0$/,'') + 'K';
+  return String(n);
+}
+
+// === Player Like/Favorite/Speed ===
+function getPlayerStorage(key) {
+  try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; }
+}
+function savePlayerStorage(key, obj) {
+  localStorage.setItem(key, JSON.stringify(obj));
+}
+function populateVideoTags(videoTags) {
+  var container = document.getElementById('videoTags');
+  if (!container) return;
+  container.innerHTML = '';
+  var tags = [];
+  try {
+    if (typeof videoTags === 'string') {
+      tags = JSON.parse(videoTags);
+    } else if (Array.isArray(videoTags)) {
+      tags = videoTags;
+    }
+  } catch(e) { return; }
+  if (!tags || !tags.length) return;
+  tags.forEach(function(tag) {
+    var disp = localizeTag(tag);
+    if (!disp) return;
+    var el = document.createElement('a');
+    el.href = 'javascript:void(0)';
+    el.className = 'video-tag-link';
+    el.textContent = disp;
+    el.onclick = function(e) { e.preventDefault(); loadRelatedByTag(tag); };
+    container.appendChild(el);
+  });
+}
+
+function togglePlayerLike() {
+  var id = new URLSearchParams(location.search).get('id');
+  if (!id) return;
+  var liked = getPlayerStorage('vhLikes');
+  var isLiking = !liked[id];
+  if (isLiking) { liked[id] = 1; } else { delete liked[id]; }
+  savePlayerStorage('vhLikes', liked);
+  updatePlayerLikeFav();
+  var url = isLiking ? '/api/videos/'+id+'/like' : '/api/videos/'+id+'/unlike';
+  fetch(url, {method:'POST'}).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById('likeCount');
+    if (el) el.textContent = formatCount(d.likes||0);
+  }).catch(function(){});
+}
+function togglePlayerFav() {
+  var id = new URLSearchParams(location.search).get('id');
+  if (!id) return;
+  var faved = getPlayerStorage('vhFavs');
+  var isFaving = !faved[id];
+  if (isFaving) { faved[id] = 1; } else { delete faved[id]; }
+  savePlayerStorage('vhFavs', faved);
+  updatePlayerLikeFav();
+  var url = isFaving ? '/api/videos/'+id+'/favorite' : '/api/videos/'+id+'/unfavorite';
+  fetch(url, {method:'POST'}).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById('favCount');
+    if (el) el.textContent = formatCount(d.favorites||0);
+  }).catch(function(){});
+}
+function updatePlayerLikeFav() {
+  var id = new URLSearchParams(location.search).get('id');
+  if (!id) return;
+  var liked = getPlayerStorage('vhLikes');
+  var faved = getPlayerStorage('vhFavs');
+  document.getElementById('btnLike').classList.toggle('liked', !!liked[id]);
+  document.getElementById('btnFav').classList.toggle('faved', !!faved[id]);
+}
+
+updatePlayerLikeFav();
+
+</script>
+<script src="js/track.js?v=v1"></script>
